@@ -1,0 +1,76 @@
+"""Load OKF bundles: frontmatter parsing, document discovery, link extraction.
+
+An OKF bundle is a directory tree of markdown files. Files named `index.md` or
+`log.md` are reserved (directory listing / change history); every other markdown
+file is a *concept*. A document's id is its bundle-relative path without the
+`.md` suffix, in leading-slash form (e.g. `/metrics/monthly-recurring-revenue`).
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
+
+RESERVED_NAMES = frozenset({"index.md", "log.md"})
+
+# Bundle-absolute markdown links: ](/path/to/concept) — external URLs don't match.
+_LINK_RE = re.compile(r"\]\((/[^)#\s]+)")
+_FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?", re.DOTALL)
+
+
+class FrontmatterError(ValueError):
+    """Raised when a document's YAML frontmatter cannot be parsed."""
+
+
+@dataclass(frozen=True)
+class Document:
+    """One markdown file in a bundle (concept or reserved file)."""
+
+    id: str  # "/metrics/monthly-recurring-revenue"
+    path: Path
+    frontmatter: dict
+    body: str
+    links: tuple[str, ...]  # outbound bundle-absolute link targets
+
+    @property
+    def is_concept(self) -> bool:
+        return self.path.name not in RESERVED_NAMES
+
+    @property
+    def type(self) -> str | None:
+        value = self.frontmatter.get("type")
+        return value if isinstance(value, str) else None
+
+
+def parse_document(root: Path, path: Path) -> Document:
+    """Parse one markdown file relative to the bundle root."""
+    text = path.read_text(encoding="utf-8")
+    frontmatter: dict = {}
+    body = text
+    if match := _FRONTMATTER_RE.match(text):
+        try:
+            loaded = yaml.safe_load(match.group(1))
+        except yaml.YAMLError as exc:
+            raise FrontmatterError(f"invalid YAML frontmatter: {exc}") from exc
+        if loaded is not None and not isinstance(loaded, dict):
+            raise FrontmatterError("frontmatter is not a YAML mapping")
+        frontmatter = loaded or {}
+        body = text[match.end() :]
+    doc_id = "/" + str(path.relative_to(root).with_suffix("")).replace("\\", "/")
+    links = tuple(m.group(1) for m in _LINK_RE.finditer(body))
+    return Document(id=doc_id, path=path, frontmatter=frontmatter, body=body, links=links)
+
+
+def load_bundle(root: Path) -> list[Document]:
+    """Parse every markdown file in a bundle, sorted by id.
+
+    Raises FrontmatterError on the first unparseable document; callers that
+    want per-file error reporting (the validator) parse file-by-file instead.
+    """
+    return sorted(
+        (parse_document(root, p) for p in root.rglob("*.md")),
+        key=lambda d: d.id,
+    )

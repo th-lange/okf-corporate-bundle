@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "MCP server exposing OKF (Open Knowledge Format) bundles to AI agents, with scoped access."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pyyaml>=6",
+]
+
+[project.scripts]
+okf-validate = "okf_mcp.validator:main"
 
 [dependency-groups]
 dev = [
