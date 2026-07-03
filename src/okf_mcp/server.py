@@ -74,6 +74,28 @@ def build_server(bundle_dir: Path | None = None) -> FastMCP:
         """
         return [summary(d) for d in index.list_by_type(concept_type)]
 
+    @mcp.tool()
+    def follow_links(concept_id: str, depth: int = 1) -> list[dict]:
+        """Traverse the knowledge graph outward from a concept.
+
+        Returns every distinct concept reachable within `depth` link-hops as a
+        summary plus `hops` (shortest distance) and `via` (the concept whose
+        link reached it). Use this to gather a whole context subgraph — e.g.
+        a metric's backing table, owning team, and runbook — in one call.
+
+        Args:
+            concept_id: Bundle-relative id to start from, e.g. "/glossary/mrr".
+            depth: Maximum link-hops to follow (default 1).
+        """
+        try:
+            reached = index.follow_links(concept_id, depth)
+        except UnknownConceptError:
+            raise ValueError(
+                f"Unknown concept id {concept_id!r}. Ids are bundle-relative "
+                f"paths like /glossary/mrr."
+            ) from None
+        return [{**summary(doc), "hops": hops, "via": via} for doc, hops, via in reached]
+
     return mcp
 
 

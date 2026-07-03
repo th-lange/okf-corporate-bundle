@@ -48,7 +48,7 @@ def test_list_by_type_unknown_type_is_empty(index: OkfIndex) -> None:
 async def test_mcp_server_exposes_expected_tools() -> None:
     server = build_server(BUNDLE)
     tools = {t.name for t in await server.list_tools()}
-    assert tools == {"get_concept", "list_by_type", "search_concepts"}
+    assert tools == {"get_concept", "list_by_type", "search_concepts", "follow_links"}
 
 
 @pytest.fixture
