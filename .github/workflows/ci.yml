@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install
+        run: uv sync
+      - name: Lint
+        run: uv run ruff check
+      - name: Tests
+        run: uv run pytest
+      - name: Validate OKF bundles
+        run: uv run okf-validate bundles/acme-knowledge bundles/acme-knowledge-restricted
