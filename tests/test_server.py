@@ -45,10 +45,10 @@ def test_list_by_type_unknown_type_is_empty(index: OkfIndex) -> None:
 
 
 @pytest.mark.anyio
-async def test_mcp_server_exposes_both_tools() -> None:
+async def test_mcp_server_exposes_expected_tools() -> None:
     server = build_server(BUNDLE)
     tools = {t.name for t in await server.list_tools()}
-    assert tools == {"get_concept", "list_by_type"}
+    assert tools == {"get_concept", "list_by_type", "search_concepts"}
 
 
 @pytest.fixture

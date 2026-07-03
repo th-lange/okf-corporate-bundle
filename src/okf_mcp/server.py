@@ -48,6 +48,24 @@ def build_server(bundle_dir: Path | None = None) -> FastMCP:
             ) from None
 
     @mcp.tool()
+    def search_concepts(
+        query: str,
+        concept_type: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[dict]:
+        """Search concepts by keyword, optionally narrowed by type and tags.
+
+        Returns compact summaries (id/type/title/description) — fetch bodies
+        via get_concept. An empty list means nothing matched.
+
+        Args:
+            query: Keywords; all terms must match (case-insensitive).
+            concept_type: Optional exact type filter, e.g. "Metric".
+            tags: Optional tag filter; matches concepts carrying any of these tags.
+        """
+        return [summary(d) for d in index.search(query, concept_type, tags)]
+
+    @mcp.tool()
     def list_by_type(concept_type: str) -> list[dict]:
         """List all concepts of a type (id/type/title/description only, no bodies).
 
