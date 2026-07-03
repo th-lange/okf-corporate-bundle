@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "okf-knowledge": {
+      "command": "uv",
+      "args": ["run", "--directory", ".", "okf-mcp"],
+      "env": {
+        "OKF_BUNDLE_DIR": "bundles/acme-knowledge"
+      }
+    }
+  }
+}
