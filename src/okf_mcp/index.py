@@ -38,6 +38,36 @@ class OkfIndex:
     def types(self) -> list[str]:
         return sorted({d.type for d in self._concepts.values() if d.type})
 
+    def follow_links(
+        self, concept_id: str, depth: int = 1
+    ) -> list[tuple[Document, int, str]]:
+        """Breadth-first traversal of outbound links from a concept.
+
+        Returns (document, hop_distance, via_id) triples for every distinct
+        concept reachable within `depth` hops, excluding the start concept.
+        Cycle-safe: each concept appears at most once, at its shortest
+        distance. Links pointing at reserved files (directory indexes) or
+        outside the bundle are skipped.
+        """
+        start = self.get_concept(concept_id)
+        seen = {start.id}
+        frontier = [start]
+        reached: list[tuple[Document, int, str]] = []
+        for hop in range(1, max(depth, 0) + 1):
+            next_frontier: list[Document] = []
+            for doc in frontier:
+                for target_id in doc.links:
+                    if target_id in seen:
+                        continue
+                    seen.add(target_id)
+                    target = self._concepts.get(target_id)
+                    if target is None:
+                        continue  # directory index, log, or dangling link
+                    reached.append((target, hop, doc.id))
+                    next_frontier.append(target)
+            frontier = next_frontier
+        return reached
+
     def search(
         self,
         query: str,
