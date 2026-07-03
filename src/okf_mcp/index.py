@@ -38,6 +38,40 @@ class OkfIndex:
     def types(self) -> list[str]:
         return sorted({d.type for d in self._concepts.values() if d.type})
 
+    def search(
+        self,
+        query: str,
+        concept_type: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[Document]:
+        """Keyword search over title/description/body with optional facets.
+
+        Every whitespace-separated term must occur (case-insensitive) somewhere
+        in the concept's title, description, or body. `concept_type` filters
+        exactly; `tags` matches if any requested tag is present.
+        """
+        terms = [t.lower() for t in query.split() if t]
+        results = []
+        for doc in self._concepts.values():
+            if concept_type is not None and doc.type != concept_type:
+                continue
+            if tags:
+                doc_tags = doc.frontmatter.get("tags") or []
+                if not set(tags) & set(doc_tags):
+                    continue
+            haystack = " ".join(
+                str(part)
+                for part in (
+                    doc.frontmatter.get("title"),
+                    doc.frontmatter.get("description"),
+                    doc.body,
+                )
+                if part
+            ).lower()
+            if all(term in haystack for term in terms):
+                results.append(doc)
+        return sorted(results, key=lambda d: d.id)
+
 
 def summary(doc: Document) -> dict:
     """The compact shape returned by list-style tools (no body)."""
