@@ -135,18 +135,22 @@ and record the change in the bundle's `log.md`.
 **draft** concepts — it never writes into a served bundle:
 
 ```bash
-<<<<<<< HEAD
 uv run okf-ingest                  # ingest new/modified docs (config/ingest.yaml)
 uv run okf-ingest status           # what's new / unchanged / modified / removed
-=======
-uv run okf-ingest                  # uses config/ingest.yaml
->>>>>>> origin/main
 uv run okf-ingest --config my.yaml
 ```
 
-Sources live in `config/ingest.yaml` (`staging_dir` plus a `sources` list;
-`git` is the available type today — new connectors implement the `Source`
-protocol in `src/okf_mcp/ingest/sources.py`). Every draft lands under
+Sources live in `config/ingest.yaml` (`staging_dir` plus a `sources` list).
+Available types — new connectors implement the `Source` protocol in
+`src/okf_mcp/ingest/sources.py`:
+
+- `git` — `url` (local path or anything `git clone` accepts) + optional
+  `paths` glob patterns. Revision = last commit touching the file.
+- `gdrive` — `folder_id` of a Drive folder. Native Google Docs are exported
+  as markdown, `*.md` files downloaded as-is, everything else skipped.
+  Revision = `headRevisionId` (falling back to `modifiedTime`). Credentials
+  come from the `GOOGLE_DRIVE_TOKEN` env var (an OAuth bearer token with
+  `drive.readonly` scope) — never from config files. Every draft lands under
 `ingest/drafts/<source>/…` stamped with provenance frontmatter: `source:`
 (the per-document source URI), `source_rev:` (the revision it was taken
 from), and `ingested_at:`. Documents without frontmatter get `type: Document`
@@ -154,7 +158,6 @@ so drafts always pass validation; a `Transformer` seam
 (`src/okf_mcp/ingest/transform.py`) is where smarter conversion plugs in
 later.
 
-<<<<<<< HEAD
 The **ledger** (`ingest/ledger.yaml`, committed) gives full visibility into
 what has been ingested: one entry per source document with its URI, revision,
 draft path, and ingest time. `okf-ingest status` compares current source
@@ -164,8 +167,6 @@ modified documents; documents that vanished upstream are flagged in the
 ledger (`removed_at`) and reported — never deleted. Retiring the concept a
 removed document produced is a human decision.
 
-=======
->>>>>>> origin/main
 The staging directory is gitignored on purpose: drafts reach a bundle only by
 a human reviewing them, moving them in, and opening a normal PR.
 

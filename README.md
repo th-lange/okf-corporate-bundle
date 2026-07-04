@@ -48,11 +48,8 @@ bundles/
 ├── acme-knowledge/             internal bundle (glossary, metrics, data, systems,
 │                               runbooks, playbooks, teams, decisions, policies)
 └── acme-knowledge-restricted/  restricted bundle (trade-secret methods, patents, raw PII)
-<<<<<<< HEAD
-=======
 config/auth.yaml                demo token → scope-set assignments (persona users)
 config/resources.yaml           per-resource authorization grants (scope → URIs)
->>>>>>> origin/main
 config/ingest.yaml              ingest sources (demo: this repo's own docs/)
 src/okf_mcp/                    MCP server package
 ├── parser.py                   frontmatter + link extraction
@@ -63,10 +60,7 @@ src/okf_mcp/                    MCP server package
 ├── server.py                   MCP server (stdio) exposing the tools
 ├── validator.py                bundle validator CLI (also run in CI)
 └── ingest/                     okf-ingest: Source connectors → provenance-stamped drafts
-<<<<<<< HEAD
-=======
 docs/demo.md                    end-to-end walkthrough: MRR investigation + personas
->>>>>>> origin/main
 docs/usage.md                   how to run, author, and consume the bundles
 tests/
 ```

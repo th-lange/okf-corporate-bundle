@@ -32,6 +32,7 @@ from pathlib import Path
 import yaml
 
 from okf_mcp.ingest.core import write_draft
+from okf_mcp.ingest.drive import DriveSource
 from okf_mcp.ingest.ledger import Ledger
 from okf_mcp.ingest.sources import GitSource, Source, SourceDocument
 from okf_mcp.ingest.transform import PassthroughTransformer
@@ -54,9 +55,13 @@ def _build_source(entry: object) -> Source:
             raise ConfigError(f"git source {entry['name']!r} needs a `url`")
         paths = entry.get("paths", ["**/*.md"])
         return GitSource(name=entry["name"], url=entry["url"], paths=tuple(paths))
+    if kind == "gdrive":
+        if not isinstance(entry.get("folder_id"), str):
+            raise ConfigError(f"gdrive source {entry['name']!r} needs a `folder_id`")
+        return DriveSource(name=entry["name"], folder_id=entry["folder_id"])
     raise ConfigError(
-        f"unknown source type {kind!r} (known: git). New connectors implement "
-        "the Source protocol in okf_mcp.ingest.sources."
+        f"unknown source type {kind!r} (known: git, gdrive). New connectors "
+        "implement the Source protocol in okf_mcp.ingest.sources."
     )
 
 

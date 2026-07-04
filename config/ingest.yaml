@@ -5,10 +5,7 @@
 # Demo: ingest this repo's own docs/ so `uv run okf-ingest` works from a
 # fresh clone with no external dependencies.
 staging_dir: ingest/drafts
-<<<<<<< HEAD
 ledger: ingest/ledger.yaml
-=======
->>>>>>> origin/main
 sources:
   - name: self-docs
     type: git
