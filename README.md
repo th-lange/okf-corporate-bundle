@@ -49,11 +49,13 @@ bundles/
 │                               runbooks, playbooks, teams, decisions, policies)
 └── acme-knowledge-restricted/  restricted bundle (trade-secret methods, patents, raw PII)
 config/auth.yaml                demo token → scope-set assignments (persona users)
+config/resources.yaml           per-resource authorization grants (scope → URIs)
 src/okf_mcp/                    MCP server package
 ├── parser.py                   frontmatter + link extraction
 ├── index.py                    in-memory index: lookup, search, graph traversal
 ├── scopes.py                   effective-scope resolution + visibility rule
 ├── auth.py                     pluggable Authenticator (IdP seam) + static demo impl
+├── authz.py                    per-resource grants + JSONL audit log
 ├── server.py                   MCP server (stdio) exposing the tools
 └── validator.py                bundle validator CLI (also run in CI)
 docs/usage.md                   how to run, author, and consume the bundles
@@ -83,6 +85,7 @@ visibility. Current tools:
 | `list_by_type(type)` | "What metrics/runbooks/… exist?" |
 | `get_concept(id)` | "What is the authoritative definition?" — full frontmatter + body |
 | `follow_links(id, depth?)` | "What's connected?" — cycle-safe graph traversal, summaries + hop distance |
+| `resolve_resource(id)` | "Give me the actual data pointer" — the `resource:` URI, gated by per-resource grants and audit-logged |
 
 List-style tools return summaries (id/type/title/description) — never bodies — so
 agents scan cheaply and fetch full text only for the concepts they actually need.
