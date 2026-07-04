@@ -115,6 +115,16 @@ Link with bundle-absolute markdown links (`[MRR term](/glossary/mrr)`), and name
 the relationship in the surrounding prose ("computed from", "owned by",
 "on break: see runbook"). The link asserts the relationship; the prose types it.
 
+**Cross-bundle references** use the qualified form
+`[logo churn rate](acme-knowledge:/metrics/logo-churn-rate)` — the prefix is
+the bundle's directory name. The MCP layer resolves these only when the named
+bundle is served *and* the target is within the caller's scopes: the edge
+exists only for callers who can see both sides, and for everyone else there is
+no trace of it. Links into bundles a session doesn't serve are inert (bundles
+stay independently shippable); `okf-validate` cross-checks qualified links
+when the named bundle is part of the same validation run, and skips them when
+a bundle is validated alone.
+
 The house taxonomy maps directories to types and to the question each answers:
 `glossary/` (Term), `metrics/` (Metric), `data/` (BigQuery Table, Dataset),
 `systems/` (Service, API Endpoint), `runbooks/` (Runbook), `playbooks/`

@@ -17,6 +17,10 @@ class DuplicateConceptError(ValueError):
     """Raised when the same concept id appears in more than one bundle."""
 
 
+class DuplicateBundleError(ValueError):
+    """Raised when two loaded bundles share a name (the qualified-link prefix)."""
+
+
 class OkfIndex:
     """Loads one or more bundles once and answers concept lookups.
 
@@ -28,6 +32,14 @@ class OkfIndex:
 
     def __init__(self, *bundle_dirs: Path) -> None:
         self.bundle_dirs = tuple(bundle_dirs)
+        names = [Path(d).name for d in bundle_dirs]
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        if duplicates:
+            raise DuplicateBundleError(
+                f"bundle names must be unique (qualified links resolve by name): "
+                f"{', '.join(duplicates)}"
+            )
+        self._bundle_names = frozenset(names)
         self._concepts: dict[str, Document] = {}
         self._scopes: dict[str, frozenset[str]] = {}
         for root in bundle_dirs:
@@ -51,6 +63,7 @@ class OkfIndex:
         caller = frozenset(caller_scopes)
         view = OkfIndex()
         view.bundle_dirs = self.bundle_dirs
+        view._bundle_names = self._bundle_names
         view._concepts = {
             cid: doc
             for cid, doc in self._concepts.items()
@@ -90,7 +103,9 @@ class OkfIndex:
         concept reachable within `depth` hops, excluding the start concept.
         Cycle-safe: each concept appears at most once, at its shortest
         distance. Links pointing at reserved files (directory indexes) or
-        outside the bundle are skipped.
+        outside the served bundles are skipped, and qualified cross-bundle
+        links (`bundle:/concept/id`) are followed only when that bundle is
+        loaded and the target is within this view.
         """
         start = self.get_concept(concept_id)
         seen = {start.id}
@@ -100,16 +115,29 @@ class OkfIndex:
             next_frontier: list[Document] = []
             for doc in frontier:
                 for target_id in doc.links:
-                    if target_id in seen:
+                    resolved = self._resolve_link(target_id)
+                    if resolved is None or resolved in seen:
                         continue
-                    seen.add(target_id)
-                    target = self._concepts.get(target_id)
+                    seen.add(resolved)
+                    target = self._concepts.get(resolved)
                     if target is None:
-                        continue  # directory index, log, or dangling link
+                        continue  # directory index, log, dangling, or out of scope
                     reached.append((target, hop, doc.id))
                     next_frontier.append(target)
             frontier = next_frontier
         return reached
+
+    def _resolve_link(self, target: str) -> str | None:
+        """Bundle-absolute targets pass through; qualified `bundle:/id` targets
+        resolve into the flat namespace only when that bundle is loaded —
+        links into bundles this session does not serve simply do not exist.
+        """
+        if target.startswith("/"):
+            return target
+        bundle, sep, rest = target.partition(":")
+        if sep and bundle in self._bundle_names and rest.startswith("/"):
+            return rest
+        return None
 
     def search(
         self,

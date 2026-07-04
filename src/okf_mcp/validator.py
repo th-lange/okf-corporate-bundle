@@ -9,6 +9,8 @@ Checks, per bundle:
 - `scope` (concepts) and `scope_default` (index.md files) are non-empty lists
   of non-empty strings, and each field appears only where it is meaningful
 - bundle-absolute links resolve to a document (or a directory with an index.md)
+- qualified cross-bundle links (`bundle:/concept/id`) resolve when the named
+  bundle is part of the same validation run; validated alone, they are skipped
 
 Exit code is non-zero when any finding is reported.
 """
@@ -82,7 +84,14 @@ def _is_iso8601(value: object) -> bool:
     return True
 
 
-def validate_bundle(root: Path) -> list[Finding]:
+def validate_bundle(root: Path, external: dict[str, set[str]] | None = None) -> list[Finding]:
+    """Validate one bundle; `external` maps sibling bundle names to their ids.
+
+    Qualified cross-bundle links (`bundle:/concept/id`) are checked only when
+    the named bundle is in `external` — bundles must stay independently
+    shippable, so a reference into a bundle that wasn't part of this
+    validation run is never a finding.
+    """
     findings: list[Finding] = []
     documents: list[Document] = []
     for path in sorted(root.rglob("*.md")):
@@ -99,9 +108,27 @@ def validate_bundle(root: Path) -> list[Finding]:
     for doc in documents:
         rel = str(doc.path.relative_to(root))
         for target in doc.links:
-            if target not in ids and f"{target}/index" not in ids:
-                findings.append(Finding(rel, f"dangling link: {target}"))
+            if target.startswith("/"):
+                if target not in ids and f"{target}/index" not in ids:
+                    findings.append(Finding(rel, f"dangling link: {target}"))
+                continue
+            bundle, _, rest = target.partition(":")
+            if external is None or bundle not in external:
+                continue  # names a bundle outside this validation run
+            sibling = external[bundle]
+            if rest not in sibling and f"{rest}/index" not in sibling:
+                findings.append(Finding(rel, f"dangling cross-bundle link: {target}"))
     return findings
+
+
+def _collect_ids(root: Path) -> set[str]:
+    ids = set()
+    for path in root.rglob("*.md"):
+        try:
+            ids.add(parse_document(root, path).id)
+        except FrontmatterError:
+            continue
+    return ids
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -109,13 +136,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("bundles", nargs="+", type=Path, help="bundle root directories")
     args = parser.parse_args(argv)
 
+    roots = [root for root in args.bundles if root.is_dir()]
+    names = [root.name for root in roots]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        print(f"bundle names must be unique: {', '.join(duplicates)}", file=sys.stderr)
+        return 2
+    external = {root.name: _collect_ids(root) for root in roots} if len(roots) > 1 else None
+
     exit_code = 0
     for root in args.bundles:
         if not root.is_dir():
             print(f"[{root}] not a directory", file=sys.stderr)
             exit_code = 2
             continue
-        findings = validate_bundle(root)
+        findings = validate_bundle(root, external)
         status = "OK" if not findings else f"{len(findings)} finding(s)"
         print(f"[{root}] {status}")
         for finding in findings:
