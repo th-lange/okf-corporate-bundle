@@ -50,6 +50,7 @@ bundles/
 └── acme-knowledge-restricted/  restricted bundle (trade-secret methods, patents, raw PII)
 config/auth.yaml                demo token → scope-set assignments (persona users)
 config/resources.yaml           per-resource authorization grants (scope → URIs)
+config/ingest.yaml              ingest sources (demo: this repo's own docs/)
 src/okf_mcp/                    MCP server package
 ├── parser.py                   frontmatter + link extraction
 ├── index.py                    in-memory index: lookup, search, graph traversal
@@ -57,7 +58,8 @@ src/okf_mcp/                    MCP server package
 ├── auth.py                     pluggable Authenticator (IdP seam) + static demo impl
 ├── authz.py                    per-resource grants + JSONL audit log
 ├── server.py                   MCP server (stdio) exposing the tools
-└── validator.py                bundle validator CLI (also run in CI)
+├── validator.py                bundle validator CLI (also run in CI)
+└── ingest/                     okf-ingest: Source connectors → provenance-stamped drafts
 docs/demo.md                    end-to-end walkthrough: MRR investigation + personas
 docs/usage.md                   how to run, author, and consume the bundles
 tests/
@@ -116,6 +118,7 @@ uv run pytest                            # tests
 uv run ruff check                        # lint
 uv run okf-validate bundles/acme-knowledge bundles/acme-knowledge-restricted
 uv run okf-mcp                           # start the MCP server (stdio)
+uv run okf-ingest                        # pull configured sources into draft concepts
 ```
 
 CI runs lint, tests, and the bundle validator on every push.

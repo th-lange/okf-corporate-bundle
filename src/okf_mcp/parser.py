@@ -45,11 +45,12 @@ class Document:
         return value if isinstance(value, str) else None
 
 
-def parse_document(root: Path, path: Path) -> Document:
-    """Parse one markdown file relative to the bundle root."""
-    text = path.read_text(encoding="utf-8")
-    frontmatter: dict = {}
-    body = text
+def split_frontmatter(text: str) -> tuple[dict, str]:
+    """Split leading YAML frontmatter from the body.
+
+    Returns ({}, text) when no frontmatter block is present; raises
+    FrontmatterError on unparseable YAML or a non-mapping.
+    """
     if match := _FRONTMATTER_RE.match(text):
         try:
             loaded = yaml.safe_load(match.group(1))
@@ -57,8 +58,13 @@ def parse_document(root: Path, path: Path) -> Document:
             raise FrontmatterError(f"invalid YAML frontmatter: {exc}") from exc
         if loaded is not None and not isinstance(loaded, dict):
             raise FrontmatterError("frontmatter is not a YAML mapping")
-        frontmatter = loaded or {}
-        body = text[match.end() :]
+        return loaded or {}, text[match.end() :]
+    return {}, text
+
+
+def parse_document(root: Path, path: Path) -> Document:
+    """Parse one markdown file relative to the bundle root."""
+    frontmatter, body = split_frontmatter(path.read_text(encoding="utf-8"))
     doc_id = "/" + str(path.relative_to(root).with_suffix("")).replace("\\", "/")
     links = tuple(m.group(1) for m in _LINK_RE.finditer(body))
     return Document(id=doc_id, path=path, frontmatter=frontmatter, body=body, links=links)

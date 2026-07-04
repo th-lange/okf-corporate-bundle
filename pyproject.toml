@@ -12,6 +12,7 @@ dependencies = [
 [project.scripts]
 okf-validate = "okf_mcp.validator:main"
 okf-mcp = "okf_mcp.server:main"
+okf-ingest = "okf_mcp.ingest.cli:main"
 
 [dependency-groups]
 dev = [

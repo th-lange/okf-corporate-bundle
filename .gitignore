@@ -10,3 +10,7 @@ build/
 .pytest_cache/
 .ruff_cache/
 uv.lock
+
+# okf-ingest workspace (drafts reach bundles only via reviewed PRs)
+ingest/drafts/
+.okf-ingest-cache/
