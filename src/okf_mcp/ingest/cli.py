@@ -34,6 +34,7 @@ import yaml
 from okf_mcp.ingest.core import write_draft
 from okf_mcp.ingest.drive import DriveSource
 from okf_mcp.ingest.ledger import Ledger
+from okf_mcp.ingest.s3 import S3Source
 from okf_mcp.ingest.sources import GitSource, Source, SourceDocument
 from okf_mcp.ingest.transform import PassthroughTransformer
 from okf_mcp.parser import FrontmatterError, parse_document
@@ -59,8 +60,14 @@ def _build_source(entry: object) -> Source:
         if not isinstance(entry.get("folder_id"), str):
             raise ConfigError(f"gdrive source {entry['name']!r} needs a `folder_id`")
         return DriveSource(name=entry["name"], folder_id=entry["folder_id"])
+    if kind == "s3":
+        if not isinstance(entry.get("bucket"), str):
+            raise ConfigError(f"s3 source {entry['name']!r} needs a `bucket`")
+        return S3Source(
+            name=entry["name"], bucket=entry["bucket"], prefix=entry.get("prefix", "")
+        )
     raise ConfigError(
-        f"unknown source type {kind!r} (known: git, gdrive). New connectors "
+        f"unknown source type {kind!r} (known: git, gdrive, s3). New connectors "
         "implement the Source protocol in okf_mcp.ingest.sources."
     )
 

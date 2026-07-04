@@ -150,7 +150,10 @@ Available types — new connectors implement the `Source` protocol in
   as markdown, `*.md` files downloaded as-is, everything else skipped.
   Revision = `headRevisionId` (falling back to `modifiedTime`). Credentials
   come from the `GOOGLE_DRIVE_TOKEN` env var (an OAuth bearer token with
-  `drive.readonly` scope) — never from config files. Every draft lands under
+  `drive.readonly` scope) — never from config files.
+- `s3` — `bucket` + optional `prefix`; `*.md` objects only. Revision = the
+  object's ETag. Requires the `s3` extra (`uv sync --extra s3`); credentials
+  come from the standard AWS chain (env vars, profile, instance role). Every draft lands under
 `ingest/drafts/<source>/…` stamped with provenance frontmatter: `source:`
 (the per-document source URI), `source_rev:` (the revision it was taken
 from), and `ingested_at:`. Documents without frontmatter get `type: Document`
