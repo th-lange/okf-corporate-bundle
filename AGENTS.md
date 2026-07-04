@@ -30,6 +30,9 @@ src/okf_mcp/index.py                in-memory index: lookup, search, follow_link
 src/okf_mcp/server.py               MCP server (stdio), tools: get_concept,
                                     search_concepts, list_by_type, follow_links
 src/okf_mcp/validator.py            bundle validator CLI (okf-validate)
+src/okf_mcp/ingest/                 okf-ingest: Source connectors (sources.py),
+                                    Transformer seam (transform.py), core loop, CLI
+config/ingest.yaml                  ingest source configuration
 tests/                              pytest suite, one file per feature
 docs/usage.md                       usage doc, do's and don'ts
 ```
@@ -42,6 +45,7 @@ uv run pytest                            # tests
 uv run ruff check                        # lint (line length 100)
 uv run okf-validate bundles/acme-knowledge bundles/acme-knowledge-restricted
 uv run okf-mcp                           # run the MCP server (stdio); OKF_BUNDLE_DIR selects the bundle
+uv run okf-ingest                        # pull sources into ingest/drafts/ (config/ingest.yaml)
 ```
 
 CI runs lint, tests, and the validator on every push — all three must pass.
@@ -57,6 +61,9 @@ CI runs lint, tests, and the validator on every push — all three must pass.
 - **Bundle edits go through PR review** — that includes anything an agent or
   ingester generates. Update the bundle's `log.md` and the concept's
   `timestamp:` with content changes.
+- **The ingester proposes, never publishes.** okf-ingest writes drafts to the
+  gitignored staging dir only; never point it at `bundles/`, and never commit
+  drafts unreviewed.
 - **List-style MCP tools return summaries, never bodies.** Preserve this when
   adding tools — it is the context-size guarantee.
 - **Sensitivity = bundle separation.** Never move restricted concepts into the

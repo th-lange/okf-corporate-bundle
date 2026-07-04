@@ -1,0 +1,12 @@
+# okf-ingest sources (issue #15). Each source pulls documents that become
+# *draft* concepts under staging_dir — never directly into a served bundle;
+# a human reviews drafts and moves them into a bundle via a normal PR.
+#
+# Demo: ingest this repo's own docs/ so `uv run okf-ingest` works from a
+# fresh clone with no external dependencies.
+staging_dir: ingest/drafts
+sources:
+  - name: self-docs
+    type: git
+    url: .
+    paths: ["docs/*.md"]

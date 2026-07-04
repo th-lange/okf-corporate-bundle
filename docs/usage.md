@@ -77,6 +77,29 @@ uv run okf-validate bundles/acme-knowledge bundles/acme-knowledge-restricted
 
 and record the change in the bundle's `log.md`.
 
+## Ingesting external documents
+
+`okf-ingest` pulls documents from configured sources and proposes them as
+**draft** concepts — it never writes into a served bundle:
+
+```bash
+uv run okf-ingest                  # uses config/ingest.yaml
+uv run okf-ingest --config my.yaml
+```
+
+Sources live in `config/ingest.yaml` (`staging_dir` plus a `sources` list;
+`git` is the available type today — new connectors implement the `Source`
+protocol in `src/okf_mcp/ingest/sources.py`). Every draft lands under
+`ingest/drafts/<source>/…` stamped with provenance frontmatter: `source:`
+(the per-document source URI), `source_rev:` (the revision it was taken
+from), and `ingested_at:`. Documents without frontmatter get `type: Document`
+so drafts always pass validation; a `Transformer` seam
+(`src/okf_mcp/ingest/transform.py`) is where smarter conversion plugs in
+later.
+
+The staging directory is gitignored on purpose: drafts reach a bundle only by
+a human reviewing them, moving them in, and opening a normal PR.
+
 ## Do's
 
 - **Curate narrow and correct.** A small corpus that is never wrong beats a big
