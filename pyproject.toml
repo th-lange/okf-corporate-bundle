@@ -14,6 +14,9 @@ okf-validate = "okf_mcp.validator:main"
 okf-mcp = "okf_mcp.server:main"
 okf-ingest = "okf_mcp.ingest.cli:main"
 
+[project.optional-dependencies]
+s3 = ["boto3>=1.34"]
+
 [dependency-groups]
 dev = [
     "pytest>=8",
