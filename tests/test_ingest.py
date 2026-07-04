@@ -74,6 +74,7 @@ def test_cli_end_to_end(source_repo: Path, tmp_path: Path, capsys) -> None:
     config = tmp_path / "ingest.yaml"
     config.write_text(
         f"staging_dir: {staging}\n"
+        f"ledger: {tmp_path / 'ledger.yaml'}\n"
         "sources:\n"
         f"  - name: handbook\n    type: git\n    url: {source_repo}\n"
     )
@@ -84,6 +85,8 @@ def test_cli_end_to_end(source_repo: Path, tmp_path: Path, capsys) -> None:
 
 def test_cli_rejects_unknown_source_type(tmp_path: Path, capsys) -> None:
     config = tmp_path / "ingest.yaml"
-    config.write_text("sources:\n  - name: x\n    type: carrier-pigeon\n")
+    config.write_text(
+        f"ledger: {tmp_path / 'ledger.yaml'}\nsources:\n  - name: x\n    type: carrier-pigeon\n"
+    )
     assert ingest_main(["--config", str(config)]) == 2
     assert "unknown source type" in capsys.readouterr().err
