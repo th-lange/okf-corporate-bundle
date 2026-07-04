@@ -15,6 +15,8 @@ the affected documentation in the same commit/PR:**
 - **AGENTS.md** (this file) — when commands, layout, or conventions change.
 - **README.md** — when architecture, tools, layout, or roadmap change.
 - **docs/usage.md** — when server usage, authoring rules, or the do's/don'ts change.
+- **docs/demo.md** — when tool behaviour, personas, or scope assignments change
+  the walkthrough's expected outputs (re-run its commands to confirm).
 
 A change that lands without its doc updates is incomplete. If you finish a task
 and haven't checked all three files, you are not done. Stale documentation is a
@@ -38,6 +40,7 @@ src/okf_mcp/server.py               MCP server (stdio), tools: get_concept,
                                     resolve_resource (authz-gated, audit-logged)
 src/okf_mcp/validator.py            bundle validator CLI (okf-validate)
 tests/                              pytest suite, one file per feature
+docs/demo.md                        end-to-end demo: MRR investigation + persona visibility
 docs/usage.md                       usage doc, do's and don'ts
 ```
 
