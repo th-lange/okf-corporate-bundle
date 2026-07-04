@@ -88,9 +88,17 @@ uv run okf-ingest status           # what's new / unchanged / modified / removed
 uv run okf-ingest --config my.yaml
 ```
 
-Sources live in `config/ingest.yaml` (`staging_dir` plus a `sources` list;
-`git` is the available type today — new connectors implement the `Source`
-protocol in `src/okf_mcp/ingest/sources.py`). Every draft lands under
+Sources live in `config/ingest.yaml` (`staging_dir` plus a `sources` list).
+Available types — new connectors implement the `Source` protocol in
+`src/okf_mcp/ingest/sources.py`:
+
+- `git` — `url` (local path or anything `git clone` accepts) + optional
+  `paths` glob patterns. Revision = last commit touching the file.
+- `gdrive` — `folder_id` of a Drive folder. Native Google Docs are exported
+  as markdown, `*.md` files downloaded as-is, everything else skipped.
+  Revision = `headRevisionId` (falling back to `modifiedTime`). Credentials
+  come from the `GOOGLE_DRIVE_TOKEN` env var (an OAuth bearer token with
+  `drive.readonly` scope) — never from config files. Every draft lands under
 `ingest/drafts/<source>/…` stamped with provenance frontmatter: `source:`
 (the per-document source URI), `source_rev:` (the revision it was taken
 from), and `ingested_at:`. Documents without frontmatter get `type: Document`
