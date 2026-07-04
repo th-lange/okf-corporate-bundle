@@ -1,9 +1,22 @@
 # okf-corporate-bundle
 
-A working example of serving corporate knowledge to AI agents: two [OKF
-(Open Knowledge Format)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
+A working example of serving corporate knowledge to AI agents: two
+[OKF (Open Knowledge Format)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
 bundles for a fictional B2B SaaS company ("Acme"), plus an MCP server that exposes
 them to agents with set-based, scoped access control.
+
+> **Docs:** [Usage — do's and don'ts](docs/usage.md) · [Agent entry point](AGENTS.md)
+
+## Why
+
+Most agent inefficiency isn't reasoning failure — it's *context starvation*. An agent
+asked "why did MRR drop?" that doesn't know the company's MRR definition, which table
+backs it, or who owns it will guess, hallucinate a plausible-but-wrong query, or bounce
+the question back to a human. A curated, cross-linked, permissioned knowledge bundle
+removes the starvation: the authoritative answer is one tool call away, and the related
+answers are one link-hop further. Agents *look things up* instead of guessing — and they
+navigate the graph instead of crawling the corpus, so context stays small no matter how
+large the knowledge base grows.
 
 ## What is OKF?
 
@@ -16,6 +29,18 @@ concepts form a knowledge graph agents can traverse.
 There is no schema registry, no central authority, no required tooling: if you can
 `cat` a file you can read OKF; if you can `git clone` a repo you can ship it.
 
+## The two-axis model
+
+Knowledge is placed on a grid:
+
+- **Domain axis** (the directories): glossary, metrics, data, systems, runbooks,
+  playbooks, teams, decisions, policies. Types match the questions agents actually
+  ask ("what do we mean by X?", "it's broken — what do I do?", "who owns this?").
+- **Sensitivity axis** (classification → bundle separation): public → internal →
+  confidential → restricted. Domain decides *where a concept lives*; sensitivity
+  decides *which bundle/repo* it lives in, so access control rides on plain git
+  permissions.
+
 ## Layout
 
 ```
@@ -23,7 +48,12 @@ bundles/
 ├── acme-knowledge/             internal bundle (glossary, metrics, data, systems,
 │                               runbooks, playbooks, teams, decisions, policies)
 └── acme-knowledge-restricted/  restricted bundle (trade-secret methods, patents, raw PII)
-src/okf_mcp/                    MCP server package (work in progress)
+src/okf_mcp/                    MCP server package
+├── parser.py                   frontmatter + link extraction
+├── index.py                    in-memory index: lookup, search, graph traversal
+├── server.py                   MCP server (stdio) exposing the tools
+└── validator.py                bundle validator CLI (also run in CI)
+docs/usage.md                   how to run, author, and consume the bundles
 tests/
 ```
 
@@ -32,20 +62,46 @@ tests/
 > control rides on plain git permissions — `acme-knowledge-restricted` would be its
 > own repo with its own ACL.
 
+## The MCP server
+
+`okf-mcp` (stdio transport) serves one bundle, selected via `OKF_BUNDLE_DIR`
+(default: `bundles/acme-knowledge`). Current tools:
+
+| Tool | Answers |
+|---|---|
+| `search_concepts(query, type?, tags?)` | "Where do I start?" — keyword search, compact summaries only |
+| `list_by_type(type)` | "What metrics/runbooks/… exist?" |
+| `get_concept(id)` | "What is the authoritative definition?" — full frontmatter + body |
+| `follow_links(id, depth?)` | "What's connected?" — cycle-safe graph traversal, summaries + hop distance |
+
+List-style tools return summaries (id/type/title/description) — never bodies — so
+agents scan cheaply and fetch full text only for the concepts they actually need.
+
 ## Roadmap
 
-Development is issue-driven; see the
-[issue tracker](https://github.com/th-lange/okf-corporate-bundle/issues). Highlights:
-bundle validator + CI, MCP tools (`get_concept`, `list_by_type`, `search_concepts`,
-`follow_links`, `resolve_resource`), a set-based scope model with layered defaults
-(public / group / inner-exco), and a pluggable auth layer.
+Development is issue-driven; every issue carries acceptance criteria and explicit
+blockers. Two independent tracks are open on the
+[issue tracker](https://github.com/th-lange/okf-corporate-bundle/issues):
+
+- **Access control** (#6 → #7 → #8 → #9): set-based scope model with layered
+  defaults (public / group / inner-exco), a pluggable token-to-scope-set auth
+  layer, authz-gated `resolve_resource`, and an end-to-end demo walkthrough.
+- **Ingestion** (#15 → #16 → #17/#18): `okf-ingest` CLI pulling documents from
+  configurable sources (git, Google Drive, S3) behind a small `Source` interface,
+  producing provenance-stamped **draft** concepts for human review — the ingester
+  proposes, never publishes — plus a ledger tracking what's ingested and what
+  changed or vanished upstream.
 
 ## Development
 
 Requires Python ≥ 3.12 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv sync            # create venv, install package + dev tools
-uv run pytest      # tests
-uv run ruff check  # lint
+uv sync                                  # create venv, install package + dev tools
+uv run pytest                            # tests
+uv run ruff check                        # lint
+uv run okf-validate bundles/acme-knowledge bundles/acme-knowledge-restricted
+uv run okf-mcp                           # start the MCP server (stdio)
 ```
+
+CI runs lint, tests, and the bundle validator on every push.
