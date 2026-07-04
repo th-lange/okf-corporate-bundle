@@ -84,7 +84,7 @@ visibility. Current tools:
 
 | Tool | Answers |
 |---|---|
-| `search_concepts(query, type?, tags?)` | "Where do I start?" — keyword search, compact summaries only |
+| `search_concepts(query, type?, tags?, limit?)` | "Where do I start?" — ranked keyword search (title/aliases > tags > description > body), compact summaries only |
 | `list_by_type(type)` | "What metrics/runbooks/… exist?" |
 | `get_concept(id)` | "What is the authoritative definition?" — full frontmatter + body |
 | `follow_links(id, depth?)` | "What's connected?" — cycle-safe graph traversal, summaries + hop distance |

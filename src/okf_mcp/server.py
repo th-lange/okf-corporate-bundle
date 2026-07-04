@@ -109,18 +109,22 @@ def build_server(
         query: str,
         concept_type: str | None = None,
         tags: list[str] | None = None,
+        limit: int = 20,
     ) -> list[dict]:
-        """Search concepts by keyword, optionally narrowed by type and tags.
+        """Search concepts by keyword, ranked, optionally narrowed by type and tags.
 
-        Returns compact summaries (id/type/title/description) — fetch bodies
-        via get_concept. An empty list means nothing matched.
+        Results are ranked by where terms hit (title/aliases > tags >
+        description > body) and truncated to `limit`. Returns compact
+        summaries (id/type/title/description) — fetch bodies via get_concept.
+        An empty list means nothing matched.
 
         Args:
             query: Keywords; all terms must match (case-insensitive).
             concept_type: Optional exact type filter, e.g. "Metric".
             tags: Optional tag filter; matches concepts carrying any of these tags.
+            limit: Maximum results to return (default 20).
         """
-        return [summary(d) for d in index.search(query, concept_type, tags)]
+        return [summary(d) for d in index.search(query, concept_type, tags, limit)]
 
     @mcp.tool()
     def list_by_type(concept_type: str) -> list[dict]:

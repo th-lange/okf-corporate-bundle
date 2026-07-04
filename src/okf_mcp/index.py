@@ -116,15 +116,19 @@ class OkfIndex:
         query: str,
         concept_type: str | None = None,
         tags: list[str] | None = None,
+        limit: int = 20,
     ) -> list[Document]:
-        """Keyword search over title/description/body with optional facets.
+        """Ranked keyword search with optional facets and a result limit.
 
-        Every whitespace-separated term must occur (case-insensitive) somewhere
-        in the concept's title, description, or body. `concept_type` filters
-        exactly; `tags` matches if any requested tag is present.
+        Every whitespace-separated term must occur (case-insensitive) in at
+        least one field. Results rank by where terms hit — title and curated
+        `aliases:` outrank tags, then description, then body — with the
+        concept id as a stable tiebreak. `concept_type` filters exactly;
+        `tags` matches if any requested tag is present; at most `limit`
+        results are returned so responses stay small at any corpus size.
         """
         terms = [t.lower() for t in query.split() if t]
-        results = []
+        scored: list[tuple[float, str, Document]] = []
         for doc in self._concepts.values():
             if concept_type is not None and doc.type != concept_type:
                 continue
@@ -132,18 +136,30 @@ class OkfIndex:
                 doc_tags = doc.frontmatter.get("tags") or []
                 if not set(tags) & set(doc_tags):
                     continue
-            haystack = " ".join(
-                str(part)
-                for part in (
-                    doc.frontmatter.get("title"),
-                    doc.frontmatter.get("description"),
-                    doc.body,
-                )
-                if part
-            ).lower()
-            if all(term in haystack for term in terms):
-                results.append(doc)
-        return sorted(results, key=lambda d: d.id)
+            fields = _weighted_fields(doc)
+            score = 0.0
+            for term in terms:
+                best = max((w for w, text in fields if term in text), default=0.0)
+                if best == 0.0:
+                    break
+                score += best
+            else:
+                scored.append((-score, doc.id, doc))
+        scored.sort()
+        return [doc for _, _, doc in scored[: max(limit, 0)]]
+
+
+def _weighted_fields(doc: Document) -> tuple[tuple[float, str], ...]:
+    """(weight, lowercased text) pairs — the ranking order for search."""
+    title = str(doc.frontmatter.get("title") or "")
+    aliases = doc.frontmatter.get("aliases") or []
+    tags = doc.frontmatter.get("tags") or []
+    return (
+        (3.0, " ".join([title, *map(str, aliases)]).lower()),
+        (2.0, " ".join(map(str, tags)).lower()),
+        (1.5, str(doc.frontmatter.get("description") or "").lower()),
+        (1.0, doc.body.lower()),
+    )
 
 
 def summary(doc: Document) -> dict:

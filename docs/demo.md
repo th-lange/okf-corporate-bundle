@@ -132,13 +132,14 @@ Expected output — three distinct result sets from one identical query:
 /teams/growth
 ```
 
-**Persona A, `growth` — 6 hits** (adds the group-scoped metric and tables):
+**Persona A, `growth` — 6 hits** (adds the group-scoped metric and tables;
+results are ranked, so the churn-titled metric comes first):
 
 ```
+/metrics/logo-churn-rate
 /data/tables/dim-account
 /data/tables/fct-subscription-events
 /glossary/active-account
-/metrics/logo-churn-rate
 /metrics/monthly-recurring-revenue
 /teams/growth
 ```
@@ -146,11 +147,11 @@ Expected output — three distinct result sets from one identical query:
 **Exco, `growth, platform, exco` — 7 hits** (the restricted bundle appears):
 
 ```
+/methods/churn-propensity-model        ← restricted bundle, exco only
+/metrics/logo-churn-rate
 /data/tables/dim-account
 /data/tables/fct-subscription-events
 /glossary/active-account
-/methods/churn-propensity-model        ← restricted bundle, exco only
-/metrics/logo-churn-rate
 /metrics/monthly-recurring-revenue
 /teams/growth
 ```

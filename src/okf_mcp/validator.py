@@ -8,6 +8,7 @@ Checks, per bundle:
 - `timestamp`, when present, is valid ISO-8601
 - `scope` (concepts) and `scope_default` (index.md files) are non-empty lists
   of non-empty strings, and each field appears only where it is meaningful
+- `aliases`, when present, is a non-empty list of non-empty strings on a concept
 - bundle-absolute links resolve to a document (or a directory with an index.md)
 
 Exit code is non-zero when any finding is reported.
@@ -51,6 +52,19 @@ def _check_document(doc: Document, rel: str) -> list[Finding]:
     if timestamp is not None and not _is_iso8601(timestamp):
         findings.append(Finding(rel, f"timestamp is not ISO-8601: {timestamp!r}"))
     findings.extend(_check_scope_fields(doc, rel))
+    aliases = doc.frontmatter.get("aliases")
+    if aliases is not None:
+        well_formed = (
+            isinstance(aliases, list)
+            and aliases
+            and all(isinstance(a, str) and a for a in aliases)
+        )
+        if not doc.is_concept:
+            findings.append(Finding(rel, "`aliases` is only valid on concepts"))
+        elif not well_formed:
+            findings.append(
+                Finding(rel, "`aliases` must be a non-empty list of non-empty strings")
+            )
     return findings
 
 
