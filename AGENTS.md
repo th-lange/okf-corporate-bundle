@@ -30,9 +30,12 @@ src/okf_mcp/index.py                in-memory index: lookup, search, follow_link
                                     per-session scope filtering (visible_to)
 src/okf_mcp/scopes.py               effective-scope resolution + visibility rule
 src/okf_mcp/auth.py                 Authenticator protocol (IdP seam) + static demo impl
+src/okf_mcp/authz.py                per-resource grants (ResourceAuthorizer) + AuditLog
 config/auth.yaml                    demo persona tokens → scope sets
+config/resources.yaml               resource grants: scope → resolvable URIs
 src/okf_mcp/server.py               MCP server (stdio), tools: get_concept,
-                                    search_concepts, list_by_type, follow_links
+                                    search_concepts, list_by_type, follow_links,
+                                    resolve_resource (authz-gated, audit-logged)
 src/okf_mcp/validator.py            bundle validator CLI (okf-validate)
 tests/                              pytest suite, one file per feature
 docs/usage.md                       usage doc, do's and don'ts

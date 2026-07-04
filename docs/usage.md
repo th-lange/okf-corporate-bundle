@@ -20,6 +20,10 @@ never widen visibility:
 - `OKF_AUTH_CONFIG` — auth config path (default: `config/auth.yaml`).
 - `OKF_SCOPES` — comma-separated scope labels; local dev override used only
   when no token is presented. Neither set means public-layer only.
+- `OKF_RESOURCE_CONFIG` — per-resource grants for `resolve_resource`
+  (default: `config/resources.yaml`).
+- `OKF_AUDIT_LOG` — file receiving one JSONL audit entry per
+  `resolve_resource` call (allow and deny); unset logs via `okf_mcp.audit`.
 
 The demo auth config defines five personas:
 
@@ -61,10 +65,17 @@ The intended flow — using "why did MRR drop?" as the example:
 3. `follow_links("/metrics/monthly-recurring-revenue")` → the backing table,
    producing service, owning team, and runbook in one call.
 4. `get_concept("/runbooks/mrr-discrepancy")` → the exact diagnostic steps.
+5. `resolve_resource("/metrics/monthly-recurring-revenue")` → *if this
+   session's scopes are granted that resource*, the exact BigQuery table URI.
 
 Search and list tools return compact summaries only; fetch bodies via
 `get_concept` for just the concepts you need. Navigate the graph — don't crawl
 the corpus.
+
+Resource access is separate from knowledge read access: anyone can *read
+about* MRR (it's a public concept), but only sessions holding a granting
+scope can resolve its table URI. Denials never include the URI; every call,
+allowed or denied, lands in the audit log.
 
 ## Authoring concepts
 
