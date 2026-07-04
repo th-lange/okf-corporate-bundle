@@ -48,10 +48,12 @@ bundles/
 ├── acme-knowledge/             internal bundle (glossary, metrics, data, systems,
 │                               runbooks, playbooks, teams, decisions, policies)
 └── acme-knowledge-restricted/  restricted bundle (trade-secret methods, patents, raw PII)
+config/auth.yaml                demo token → scope-set assignments (persona users)
 src/okf_mcp/                    MCP server package
 ├── parser.py                   frontmatter + link extraction
 ├── index.py                    in-memory index: lookup, search, graph traversal
 ├── scopes.py                   effective-scope resolution + visibility rule
+├── auth.py                     pluggable Authenticator (IdP seam) + static demo impl
 ├── server.py                   MCP server (stdio) exposing the tools
 └── validator.py                bundle validator CLI (also run in CI)
 docs/usage.md                   how to run, author, and consume the bundles
@@ -66,12 +68,14 @@ tests/
 ## The MCP server
 
 `okf-mcp` (stdio transport) serves one or more bundles (`OKF_BUNDLE_DIRS`,
-default: both demo bundles) behind set-based scope enforcement: the session's
-scope set (`OKF_SCOPES`) is bound once at startup, and concepts outside it are
-omitted from every tool — they cannot be listed, searched, retrieved, or
+default: both demo bundles) behind set-based scope enforcement. The session's
+scope set is bound once at startup — a bearer token (`OKF_TOKEN`) is resolved
+to a scope set by the pluggable auth layer (a static demo config today, a real
+IdP behind the same interface in production) — and concepts outside it are
+omitted from every tool: they cannot be listed, searched, retrieved, or
 reached via `follow_links`, and lookups fail exactly like missing ids. No tool
-accepts scopes as input, so prompt content can never widen visibility.
-Current tools:
+accepts scopes or tokens as input, so prompt content can never widen
+visibility. Current tools:
 
 | Tool | Answers |
 |---|---|

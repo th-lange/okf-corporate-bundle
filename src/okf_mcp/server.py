@@ -3,9 +3,11 @@
 Bundle selection: OKF_BUNDLE_DIRS (os.pathsep-separated list; OKF_BUNDLE_DIR
 also accepted), defaulting to both demo bundles under `bundles/`.
 
-Scope binding: the session's scope set comes from OKF_SCOPES (comma-separated
-labels) and is bound once, at server start — never from tool input, so prompt
-content can never widen visibility. No scopes means public-layer only.
+Scope binding: the session's scope set is resolved once, at server start —
+never from tool input, so prompt content can never widen visibility. OKF_TOKEN
+is authenticated via the pluggable auth layer (config: OKF_AUTH_CONFIG,
+default `config/auth.yaml`); without a token, OKF_SCOPES (comma-separated
+labels) acts as a local dev override. Neither set means public-layer only.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from okf_mcp.auth import Authenticator, StaticTokenAuthenticator
 from okf_mcp.index import OkfIndex, UnknownConceptError, full, summary
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -23,11 +26,14 @@ _DEFAULT_BUNDLES = (
     _REPO_ROOT / "bundles" / "acme-knowledge",
     _REPO_ROOT / "bundles" / "acme-knowledge-restricted",
 )
+_DEFAULT_AUTH_CONFIG = _REPO_ROOT / "config" / "auth.yaml"
 
 
 def build_server(
     bundle_dirs: Path | Sequence[Path] | None = None,
     scopes: Iterable[str] | None = None,
+    authenticator: Authenticator | None = None,
+    token: str | None = None,
 ) -> FastMCP:
     if bundle_dirs is None:
         raw = os.environ.get("OKF_BUNDLE_DIRS") or os.environ.get("OKF_BUNDLE_DIR")
@@ -35,7 +41,15 @@ def build_server(
     if isinstance(bundle_dirs, Path):
         bundle_dirs = [bundle_dirs]
     if scopes is None:
-        scopes = [s.strip() for s in os.environ.get("OKF_SCOPES", "").split(",") if s.strip()]
+        if token is None:
+            token = os.environ.get("OKF_TOKEN") or None
+        if token is not None:
+            if authenticator is None:
+                config = Path(os.environ.get("OKF_AUTH_CONFIG", _DEFAULT_AUTH_CONFIG))
+                authenticator = StaticTokenAuthenticator.from_file(config)
+            scopes = authenticator.authenticate(token).scopes
+        else:
+            scopes = [s.strip() for s in os.environ.get("OKF_SCOPES", "").split(",") if s.strip()]
     index = OkfIndex(*bundle_dirs).visible_to(scopes)
     mcp = FastMCP(
         "okf-knowledge",
