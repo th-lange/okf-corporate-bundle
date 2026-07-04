@@ -29,6 +29,8 @@ src/okf_mcp/parser.py               frontmatter + link extraction
 src/okf_mcp/index.py                in-memory index: lookup, search, follow_links,
                                     per-session scope filtering (visible_to)
 src/okf_mcp/scopes.py               effective-scope resolution + visibility rule
+src/okf_mcp/auth.py                 Authenticator protocol (IdP seam) + static demo impl
+config/auth.yaml                    demo persona tokens → scope sets
 src/okf_mcp/server.py               MCP server (stdio), tools: get_concept,
                                     search_concepts, list_by_type, follow_links
 src/okf_mcp/validator.py            bundle validator CLI (okf-validate)

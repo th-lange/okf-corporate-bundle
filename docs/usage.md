@@ -10,13 +10,31 @@ uv sync
 uv run okf-mcp        # stdio transport
 ```
 
-Two environment variables configure a session:
+Environment variables configure a session; everything is bound once at
+startup and no tool accepts scopes or tokens as input, so prompt content can
+never widen visibility:
 
 - `OKF_BUNDLE_DIRS` — bundle directories to serve, separated by the OS path
   separator (`:` on Linux/macOS). Default: both demo bundles.
-- `OKF_SCOPES` — comma-separated scope labels for this session, bound once at
-  startup. Unset means public-layer only. No tool accepts scopes as input, so
-  prompt content can never widen visibility.
+- `OKF_TOKEN` — bearer token, resolved to a scope set by the auth layer.
+- `OKF_AUTH_CONFIG` — auth config path (default: `config/auth.yaml`).
+- `OKF_SCOPES` — comma-separated scope labels; local dev override used only
+  when no token is presented. Neither set means public-layer only.
+
+The demo auth config defines five personas:
+
+| Token | Subject | Scopes |
+|---|---|---|
+| `demo-token-a` | user-a@acme.test | `growth` |
+| `demo-token-b` | user-b@acme.test | `platform` |
+| `demo-token-ab` | user-ab@acme.test | `growth, platform` |
+| `demo-token-c` | user-c@acme.test | `finance` (no matching concepts → public only) |
+| `demo-token-exco` | exco@acme.test | `growth, platform, exco` |
+
+Swapping in a real IdP means implementing the `Authenticator` protocol
+(`src/okf_mcp/auth.py`) — token in, subject + scope set out; enforcement does
+not change. Unknown tokens fail closed; no token means anonymous
+(public layer).
 
 Example Claude Code registration (`.mcp.json`) for a growth-scoped session:
 
@@ -26,7 +44,7 @@ Example Claude Code registration (`.mcp.json`) for a growth-scoped session:
     "okf-knowledge": {
       "command": "uv",
       "args": ["run", "okf-mcp"],
-      "env": { "OKF_SCOPES": "growth" }
+      "env": { "OKF_TOKEN": "demo-token-a" }
     }
   }
 }
