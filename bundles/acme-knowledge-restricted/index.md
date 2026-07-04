@@ -4,7 +4,8 @@ type: Index
 title: Acme Knowledge Base — RESTRICTED
 description: Proprietary IP (trade-secret methods, patents) and raw PII. Named service accounts only.
 classification: restricted
-timestamp: 2026-07-03T09:00:00Z
+scope_default: [exco]
+timestamp: 2026-07-04T09:00:00Z
 ---
 
 # Acme Knowledge Base — RESTRICTED

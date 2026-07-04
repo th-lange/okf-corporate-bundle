@@ -1,25 +1,80 @@
-"""MCP server (stdio) exposing an OKF bundle to agents.
+"""MCP server (stdio) exposing OKF bundles to agents, scoped per session.
 
-Bundle selection: the OKF_BUNDLE_DIR environment variable, defaulting to
-`bundles/acme-knowledge` relative to the repository root.
+Bundle selection: OKF_BUNDLE_DIRS (os.pathsep-separated list; OKF_BUNDLE_DIR
+also accepted), defaulting to both demo bundles under `bundles/`.
+
+Scope binding: the session's scope set is resolved once, at server start —
+never from tool input, so prompt content can never widen visibility. OKF_TOKEN
+is authenticated via the pluggable auth layer (config: OKF_AUTH_CONFIG,
+default `config/auth.yaml`); without a token, OKF_SCOPES (comma-separated
+labels) acts as a local dev override. Neither set means public-layer only.
+
+Resource authorization: resolve_resource grants come from OKF_RESOURCE_CONFIG
+(default `config/resources.yaml`); every call is audit-logged as JSONL to
+OKF_AUDIT_LOG, or to the `okf_mcp.audit` logger when unset.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from okf_mcp.auth import ANONYMOUS, Authenticator, Principal, StaticTokenAuthenticator
+from okf_mcp.authz import AuditLog, ResourceAuthorizer
 from okf_mcp.index import OkfIndex, UnknownConceptError, full, summary
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_BUNDLE = _REPO_ROOT / "bundles" / "acme-knowledge"
+_DEFAULT_BUNDLES = (
+    _REPO_ROOT / "bundles" / "acme-knowledge",
+    _REPO_ROOT / "bundles" / "acme-knowledge-restricted",
+)
+_DEFAULT_AUTH_CONFIG = _REPO_ROOT / "config" / "auth.yaml"
+_DEFAULT_RESOURCE_CONFIG = _REPO_ROOT / "config" / "resources.yaml"
 
 
-def build_server(bundle_dir: Path | None = None) -> FastMCP:
-    bundle_dir = bundle_dir or Path(os.environ.get("OKF_BUNDLE_DIR", _DEFAULT_BUNDLE))
-    index = OkfIndex(bundle_dir)
+def _resolve_principal(
+    scopes: Iterable[str] | None,
+    authenticator: Authenticator | None,
+    token: str | None,
+) -> Principal:
+    if scopes is not None:
+        return Principal(subject="session", scopes=frozenset(scopes))
+    if token is None:
+        token = os.environ.get("OKF_TOKEN") or None
+    if token is not None:
+        if authenticator is None:
+            config = Path(os.environ.get("OKF_AUTH_CONFIG", _DEFAULT_AUTH_CONFIG))
+            authenticator = StaticTokenAuthenticator.from_file(config)
+        return authenticator.authenticate(token)
+    raw = os.environ.get("OKF_SCOPES", "")
+    override = frozenset(s.strip() for s in raw.split(",") if s.strip())
+    return Principal(subject="local-dev", scopes=override) if override else ANONYMOUS
+
+
+def build_server(
+    bundle_dirs: Path | Sequence[Path] | None = None,
+    scopes: Iterable[str] | None = None,
+    authenticator: Authenticator | None = None,
+    token: str | None = None,
+    authorizer: ResourceAuthorizer | None = None,
+    audit_log: AuditLog | None = None,
+) -> FastMCP:
+    if bundle_dirs is None:
+        raw = os.environ.get("OKF_BUNDLE_DIRS") or os.environ.get("OKF_BUNDLE_DIR")
+        bundle_dirs = [Path(p) for p in raw.split(os.pathsep)] if raw else _DEFAULT_BUNDLES
+    if isinstance(bundle_dirs, Path):
+        bundle_dirs = [bundle_dirs]
+    principal = _resolve_principal(scopes, authenticator, token)
+    if authorizer is None:
+        config = Path(os.environ.get("OKF_RESOURCE_CONFIG", _DEFAULT_RESOURCE_CONFIG))
+        authorizer = ResourceAuthorizer.from_file(config)
+    if audit_log is None:
+        audit_path = os.environ.get("OKF_AUDIT_LOG")
+        audit_log = AuditLog(Path(audit_path) if audit_path else None)
+    index = OkfIndex(*bundle_dirs).visible_to(principal.scopes)
     mcp = FastMCP(
         "okf-knowledge",
         instructions=(
@@ -27,7 +82,9 @@ def build_server(bundle_dir: Path | None = None) -> FastMCP:
             "Concept ids are bundle-relative paths like "
             "/metrics/monthly-recurring-revenue. Use list_by_type or the id "
             "from another concept's links to find concepts, then get_concept "
-            "for the authoritative definition."
+            "for the authoritative definition. Results are limited to this "
+            "session's authorization scope; concepts outside it do not exist "
+            "from your point of view."
         ),
     )
 
@@ -95,6 +152,45 @@ def build_server(bundle_dir: Path | None = None) -> FastMCP:
                 f"paths like /glossary/mrr."
             ) from None
         return [{**summary(doc), "hops": hops, "via": via} for doc, hops, via in reached]
+
+    def _audit(concept_id: str, decision: str, resource: str | None = None) -> None:
+        event: dict[str, object] = {
+            "tool": "resolve_resource",
+            "subject": principal.subject,
+            "scopes": sorted(principal.scopes),
+            "concept_id": concept_id,
+            "decision": decision,
+        }
+        if resource is not None:
+            event["resource"] = resource
+        audit_log.record(**event)
+
+    @mcp.tool()
+    def resolve_resource(concept_id: str) -> dict:
+        """Resolve a concept's `resource:` URI, if this session is authorized.
+
+        Resource access is separate from knowledge read access — being able
+        to read about a table does not imply permission to query it. Every
+        call is audit-logged, allowed or not.
+
+        Args:
+            concept_id: Bundle-relative id, e.g. "/metrics/monthly-recurring-revenue".
+        """
+        try:
+            doc = index.get_concept(concept_id)
+        except UnknownConceptError:
+            _audit(concept_id, "unknown-concept")
+            raise ValueError(f"Unknown concept id {concept_id!r}.") from None
+        resource = doc.frontmatter.get("resource")
+        if not isinstance(resource, str) or not resource:
+            _audit(concept_id, "no-resource")
+            raise ValueError(f"{concept_id} declares no resource.")
+        if not authorizer.is_allowed(principal.scopes, resource):
+            # The denial must not reveal the URI.
+            _audit(concept_id, "deny", resource)
+            raise ValueError(f"Access to the resource of {concept_id} is denied for this session.")
+        _audit(concept_id, "allow", resource)
+        return {"concept_id": concept_id, "resource": resource}
 
     return mcp
 
