@@ -1,0 +1,22 @@
+# Demo token → scope-set assignments (issue #7).
+#
+# In production this file is replaced by a real IdP behind the Authenticator
+# interface (src/okf_mcp/auth.py); nothing else changes. The exco persona
+# demonstrates the layering rule: the inner layer is not special-cased in
+# enforcement — the exco user simply holds more scopes.
+users:
+  - subject: user-a@acme.test # persona A: growth analyst
+    token: demo-token-a
+    scopes: [growth]
+  - subject: user-b@acme.test # persona B: platform engineer
+    token: demo-token-b
+    scopes: [platform]
+  - subject: user-ab@acme.test # persona AB: member of both groups
+    token: demo-token-ab
+    scopes: [growth, platform]
+  - subject: user-c@acme.test # persona C: an unrelated group only
+    token: demo-token-c
+    scopes: [finance]
+  - subject: exco@acme.test # inner layer: both groups plus exco
+    token: demo-token-exco
+    scopes: [growth, platform, exco]

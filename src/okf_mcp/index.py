@@ -1,30 +1,73 @@
-"""In-memory index over an OKF bundle, backing the MCP tools."""
+"""In-memory index over OKF bundles, backing the MCP tools."""
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 from okf_mcp.parser import Document, load_bundle
+from okf_mcp.scopes import effective_scopes, is_visible
 
 
 class UnknownConceptError(KeyError):
     """Raised when a concept id does not exist in the index."""
 
 
+class DuplicateConceptError(ValueError):
+    """Raised when the same concept id appears in more than one bundle."""
+
+
 class OkfIndex:
-    """Loads a bundle once and answers concept lookups.
+    """Loads one or more bundles once and answers concept lookups.
 
     Only *concepts* are indexed for retrieval; reserved files (index.md,
-    log.md) are parsed but not served as concepts.
+    log.md) are parsed but not served as concepts. The full index is the
+    catalog; `visible_to` derives the per-session view that every serving
+    path must go through.
     """
 
-    def __init__(self, bundle_dir: Path) -> None:
-        self.bundle_dir = bundle_dir
-        documents = load_bundle(bundle_dir)
-        self._concepts: dict[str, Document] = {d.id: d for d in documents if d.is_concept}
+    def __init__(self, *bundle_dirs: Path) -> None:
+        self.bundle_dirs = tuple(bundle_dirs)
+        self._concepts: dict[str, Document] = {}
+        self._scopes: dict[str, frozenset[str]] = {}
+        for root in bundle_dirs:
+            documents = load_bundle(root)
+            scopes = effective_scopes(documents)
+            for doc in documents:
+                if not doc.is_concept:
+                    continue
+                if doc.id in self._concepts:
+                    raise DuplicateConceptError(
+                        f"concept id {doc.id!r} appears in more than one bundle"
+                    )
+                self._concepts[doc.id] = doc
+                self._scopes[doc.id] = scopes[doc.id]
+
+    def visible_to(self, caller_scopes: Iterable[str]) -> OkfIndex:
+        """The per-session view: concepts outside the caller's scopes are
+        omitted entirely — they cannot be listed, searched, retrieved, or
+        reached via follow_links, and lookups fail exactly like missing ids.
+        """
+        caller = frozenset(caller_scopes)
+        view = OkfIndex()
+        view.bundle_dirs = self.bundle_dirs
+        view._concepts = {
+            cid: doc
+            for cid, doc in self._concepts.items()
+            if is_visible(self._scopes[cid], caller)
+        }
+        view._scopes = {cid: self._scopes[cid] for cid in view._concepts}
+        return view
 
     def __len__(self) -> int:
         return len(self._concepts)
+
+    def ids(self) -> list[str]:
+        return sorted(self._concepts)
+
+    def effective_scope(self, concept_id: str) -> frozenset[str]:
+        self.get_concept(concept_id)
+        return self._scopes[concept_id]
 
     def get_concept(self, concept_id: str) -> Document:
         doc = self._concepts.get(concept_id)
