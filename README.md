@@ -5,7 +5,7 @@ A working example of serving corporate knowledge to AI agents: two
 bundles for a fictional B2B SaaS company ("Acme"), plus an MCP server that exposes
 them to agents with set-based, scoped access control.
 
-> **Docs:** [Usage — do's and don'ts](docs/usage.md) · [Agent entry point](AGENTS.md)
+> **Docs:** [Demo walkthrough](docs/demo.md) · [Usage — do's and don'ts](docs/usage.md) · [Agent entry point](AGENTS.md)
 
 ## Why
 
@@ -58,6 +58,7 @@ src/okf_mcp/                    MCP server package
 ├── authz.py                    per-resource grants + JSONL audit log
 ├── server.py                   MCP server (stdio) exposing the tools
 └── validator.py                bundle validator CLI (also run in CI)
+docs/demo.md                    end-to-end walkthrough: MRR investigation + personas
 docs/usage.md                   how to run, author, and consume the bundles
 tests/
 ```
