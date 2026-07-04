@@ -2,7 +2,8 @@
 type: Index
 title: Data Catalog
 description: Datasets and tables in the analytics warehouse, with lineage links.
-timestamp: 2026-07-03T09:00:00Z
+scope_default: [growth, platform]
+timestamp: 2026-07-04T09:00:00Z
 ---
 
 # Data Catalog

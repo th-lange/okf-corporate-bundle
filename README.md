@@ -5,7 +5,7 @@ A working example of serving corporate knowledge to AI agents: two
 bundles for a fictional B2B SaaS company ("Acme"), plus an MCP server that exposes
 them to agents with set-based, scoped access control.
 
-> **Docs:** [Usage — do's and don'ts](docs/usage.md) · [Agent entry point](AGENTS.md)
+> **Docs:** [Demo walkthrough](docs/demo.md) · [Usage — do's and don'ts](docs/usage.md) · [Agent entry point](AGENTS.md)
 
 ## Why
 
@@ -48,13 +48,31 @@ bundles/
 ├── acme-knowledge/             internal bundle (glossary, metrics, data, systems,
 │                               runbooks, playbooks, teams, decisions, policies)
 └── acme-knowledge-restricted/  restricted bundle (trade-secret methods, patents, raw PII)
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
+config/auth.yaml                demo token → scope-set assignments (persona users)
+config/resources.yaml           per-resource authorization grants (scope → URIs)
+>>>>>>> origin/main
+>>>>>>> origin/main
 config/ingest.yaml              ingest sources (demo: this repo's own docs/)
 src/okf_mcp/                    MCP server package
 ├── parser.py                   frontmatter + link extraction
 ├── index.py                    in-memory index: lookup, search, graph traversal
+├── scopes.py                   effective-scope resolution + visibility rule
+├── auth.py                     pluggable Authenticator (IdP seam) + static demo impl
+├── authz.py                    per-resource grants + JSONL audit log
 ├── server.py                   MCP server (stdio) exposing the tools
 ├── validator.py                bundle validator CLI (also run in CI)
 └── ingest/                     okf-ingest: Source connectors → provenance-stamped drafts
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
+docs/demo.md                    end-to-end walkthrough: MRR investigation + personas
+>>>>>>> origin/main
+>>>>>>> origin/main
 docs/usage.md                   how to run, author, and consume the bundles
 tests/
 ```
@@ -66,8 +84,15 @@ tests/
 
 ## The MCP server
 
-`okf-mcp` (stdio transport) serves one bundle, selected via `OKF_BUNDLE_DIR`
-(default: `bundles/acme-knowledge`). Current tools:
+`okf-mcp` (stdio transport) serves one or more bundles (`OKF_BUNDLE_DIRS`,
+default: both demo bundles) behind set-based scope enforcement. The session's
+scope set is bound once at startup — a bearer token (`OKF_TOKEN`) is resolved
+to a scope set by the pluggable auth layer (a static demo config today, a real
+IdP behind the same interface in production) — and concepts outside it are
+omitted from every tool: they cannot be listed, searched, retrieved, or
+reached via `follow_links`, and lookups fail exactly like missing ids. No tool
+accepts scopes or tokens as input, so prompt content can never widen
+visibility. Current tools:
 
 | Tool | Answers |
 |---|---|
@@ -75,6 +100,7 @@ tests/
 | `list_by_type(type)` | "What metrics/runbooks/… exist?" |
 | `get_concept(id)` | "What is the authoritative definition?" — full frontmatter + body |
 | `follow_links(id, depth?)` | "What's connected?" — cycle-safe graph traversal, summaries + hop distance |
+| `resolve_resource(id)` | "Give me the actual data pointer" — the `resource:` URI, gated by per-resource grants and audit-logged |
 
 List-style tools return summaries (id/type/title/description) — never bodies — so
 agents scan cheaply and fetch full text only for the concepts they actually need.

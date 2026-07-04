@@ -10,9 +10,37 @@ uv sync
 uv run okf-mcp        # stdio transport
 ```
 
-The server exposes one bundle, selected by the `OKF_BUNDLE_DIR` environment
-variable (default: `bundles/acme-knowledge`). Example Claude Code registration
-(`.mcp.json`):
+Environment variables configure a session; everything is bound once at
+startup and no tool accepts scopes or tokens as input, so prompt content can
+never widen visibility:
+
+- `OKF_BUNDLE_DIRS` — bundle directories to serve, separated by the OS path
+  separator (`:` on Linux/macOS). Default: both demo bundles.
+- `OKF_TOKEN` — bearer token, resolved to a scope set by the auth layer.
+- `OKF_AUTH_CONFIG` — auth config path (default: `config/auth.yaml`).
+- `OKF_SCOPES` — comma-separated scope labels; local dev override used only
+  when no token is presented. Neither set means public-layer only.
+- `OKF_RESOURCE_CONFIG` — per-resource grants for `resolve_resource`
+  (default: `config/resources.yaml`).
+- `OKF_AUDIT_LOG` — file receiving one JSONL audit entry per
+  `resolve_resource` call (allow and deny); unset logs via `okf_mcp.audit`.
+
+The demo auth config defines five personas:
+
+| Token | Subject | Scopes |
+|---|---|---|
+| `demo-token-a` | user-a@acme.test | `growth` |
+| `demo-token-b` | user-b@acme.test | `platform` |
+| `demo-token-ab` | user-ab@acme.test | `growth, platform` |
+| `demo-token-c` | user-c@acme.test | `finance` (no matching concepts → public only) |
+| `demo-token-exco` | exco@acme.test | `growth, platform, exco` |
+
+Swapping in a real IdP means implementing the `Authenticator` protocol
+(`src/okf_mcp/auth.py`) — token in, subject + scope set out; enforcement does
+not change. Unknown tokens fail closed; no token means anonymous
+(public layer).
+
+Example Claude Code registration (`.mcp.json`) for a growth-scoped session:
 
 ```json
 {
@@ -20,7 +48,7 @@ variable (default: `bundles/acme-knowledge`). Example Claude Code registration
     "okf-knowledge": {
       "command": "uv",
       "args": ["run", "okf-mcp"],
-      "env": { "OKF_BUNDLE_DIR": "bundles/acme-knowledge" }
+      "env": { "OKF_TOKEN": "demo-token-a" }
     }
   }
 }
@@ -37,10 +65,17 @@ The intended flow — using "why did MRR drop?" as the example:
 3. `follow_links("/metrics/monthly-recurring-revenue")` → the backing table,
    producing service, owning team, and runbook in one call.
 4. `get_concept("/runbooks/mrr-discrepancy")` → the exact diagnostic steps.
+5. `resolve_resource("/metrics/monthly-recurring-revenue")` → *if this
+   session's scopes are granted that resource*, the exact BigQuery table URI.
 
 Search and list tools return compact summaries only; fetch bodies via
 `get_concept` for just the concepts you need. Navigate the graph — don't crawl
 the corpus.
+
+Resource access is separate from knowledge read access: anyone can *read
+about* MRR (it's a public concept), but only sessions holding a granting
+scope can resolve its table URI. Denials never include the URI; every call,
+allowed or denied, lands in the audit log.
 
 ## Authoring concepts
 
@@ -58,6 +93,23 @@ owner: /teams/growth            # every concept names an owning team
 timestamp: 2026-07-03T09:00:00Z
 ---
 ```
+
+### Scoping
+
+Visibility is controlled by scope labels, resolved with layered defaults:
+a concept's own `scope:` list wins; otherwise the nearest ancestor `index.md`
+with a `scope_default:` applies, falling back to the bundle root's default and
+finally to `public`. A concept is visible when its effective scope contains
+`public` or intersects the caller's scope set — there is no hierarchy logic;
+broader roles simply hold more scopes.
+
+Prefer directory-level `scope_default:` (set it in the directory's `index.md`)
+and use concept-level `scope:` only for deliberate exceptions — e.g. MRR is
+explicitly `public` while `metrics/` defaults to `growth`. Out-of-scope
+concepts are omitted entirely: they cannot be listed, searched, retrieved, or
+reached via `follow_links`, and look exactly like ids that don't exist.
+
+### Links
 
 Link with bundle-absolute markdown links (`[MRR term](/glossary/mrr)`), and name
 the relationship in the surrounding prose ("computed from", "owned by",

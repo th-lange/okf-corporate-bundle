@@ -1,0 +1,27 @@
+# Per-resource authorization grants (issue #8): which scopes may *resolve*
+# which resource URIs. Deliberately separate from knowledge read access — a
+# caller may read about a table without being allowed to query it (e.g. MRR
+# is a public concept, but its BigQuery table resolves only for growth).
+#
+# Production replaces this stub with a real policy engine behind the
+# ResourceAuthorizer seam (src/okf_mcp/authz.py). A `public` grant makes a
+# resource resolvable by any session, including anonymous ones.
+grants:
+  public:
+    - https://acme.example/teams/growth
+    - https://acme.example/teams/platform
+  growth:
+    - bigquery://acme-analytics/analytics_core/mrr_daily
+    - bigquery://acme-analytics/analytics_core/logo_churn_monthly
+    - bigquery://acme-analytics/analytics_core/fct_subscription_events
+    - bigquery://acme-analytics/analytics_core/dim_account
+  platform:
+    - bigquery://acme-analytics/analytics_core/fct_subscription_events
+    - bigquery://acme-analytics/analytics_core/dim_account
+    - https://git.acme.example/platform/billing-service
+    - https://api.acme.example/billing/v2/openapi.json
+  exco:
+    - git://acme-restricted/ml/churn-propensity
+    - git://acme-restricted/pricing/engine
+    - bigquery://acme-restricted/pii/dim_account_raw
+    - https://patents.google.com/patent/US11234567B2
