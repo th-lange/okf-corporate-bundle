@@ -3,7 +3,8 @@ okf_version: "0.1"
 type: Index
 title: Acme Knowledge Base
 description: Curated domain, data, systems, and operational knowledge for Acme's AI agents and engineers.
-timestamp: 2026-07-03T09:00:00Z
+scope_default: [public]
+timestamp: 2026-07-04T09:00:00Z
 ---
 
 # Acme Knowledge Base
