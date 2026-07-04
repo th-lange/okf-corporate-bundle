@@ -27,6 +27,7 @@ bug — fix it when you find it, even if it isn't your change.
 ```
 bundles/acme-knowledge/             internal knowledge bundle (the demo corpus)
 bundles/acme-knowledge-restricted/  restricted bundle (separate repo in production)
+src/okf_mcp/knowledge.py            knowledge-root discovery (OKF_KNOWLEDGE_ROOT)
 src/okf_mcp/parser.py               frontmatter + link extraction
 src/okf_mcp/index.py                in-memory index: lookup, search, follow_links,
                                     per-session scope filtering (visible_to)
@@ -75,8 +76,12 @@ CI runs lint, tests, and the validator on every push — all three must pass.
   ingester generates. Update the bundle's `log.md` and the concept's
   `timestamp:` with content changes.
 - **The ingester proposes, never publishes.** okf-ingest writes drafts to the
-  gitignored staging dir only; never point it at `bundles/`, and never commit
-  drafts unreviewed.
+  staging dir only; never point it at `bundles/`, and never commit drafts
+  unreviewed.
+- **Operator ≠ knowledge.** This repo is the tool; real knowledge lives under
+  `OKF_KNOWLEDGE_ROOT` (bundles, staging, ledger). The in-repo `bundles/` are
+  demo fixtures. Never write ingest state or knowledge into the operator repo,
+  and never bake knowledge into the container image.
 - **List-style MCP tools return summaries, never bodies.** Preserve this when
   adding tools — it is the context-size guarantee.
 - **Sensitivity = bundle separation.** Never move restricted concepts into the
