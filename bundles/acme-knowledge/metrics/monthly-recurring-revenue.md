@@ -5,7 +5,8 @@ description: Canonical company-wide definition and computation of MRR.
 resource: bigquery://acme-analytics/analytics_core/mrr_daily
 tags: [finance, revenue, north-star]
 owner: /teams/growth
-timestamp: 2026-07-03T09:00:00Z
+scope: [public]
+timestamp: 2026-07-04T09:00:00Z
 ---
 
 # Monthly Recurring Revenue (MRR)

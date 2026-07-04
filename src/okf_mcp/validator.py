@@ -6,6 +6,8 @@ Checks, per bundle:
 - reserved filenames are not used for concepts (index.md must be an Index,
   log.md a Log)
 - `timestamp`, when present, is valid ISO-8601
+- `scope` (concepts) and `scope_default` (index.md files) are non-empty lists
+  of non-empty strings, and each field appears only where it is meaningful
 - bundle-absolute links resolve to a document (or a directory with an index.md)
 
 Exit code is non-zero when any finding is reported.
@@ -20,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from okf_mcp.parser import Document, FrontmatterError, parse_document
+from okf_mcp.scopes import declared_scopes
 
 _RESERVED_TYPES = {"index.md": "Index", "log.md": "Log"}
 
@@ -47,6 +50,23 @@ def _check_document(doc: Document, rel: str) -> list[Finding]:
     timestamp = doc.frontmatter.get("timestamp")
     if timestamp is not None and not _is_iso8601(timestamp):
         findings.append(Finding(rel, f"timestamp is not ISO-8601: {timestamp!r}"))
+    findings.extend(_check_scope_fields(doc, rel))
+    return findings
+
+
+def _check_scope_fields(doc: Document, rel: str) -> list[Finding]:
+    findings = []
+    is_index = doc.path.name == "index.md"
+    for field, allowed in (("scope", doc.is_concept), ("scope_default", is_index)):
+        if field not in doc.frontmatter:
+            continue
+        if not allowed:
+            where = "concepts" if field == "scope" else "index.md files"
+            findings.append(Finding(rel, f"`{field}` is only valid on {where}"))
+        elif declared_scopes(doc.frontmatter, field) is None:
+            findings.append(
+                Finding(rel, f"`{field}` must be a non-empty list of non-empty strings")
+            )
     return findings
 
 

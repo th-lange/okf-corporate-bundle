@@ -26,7 +26,9 @@ bug — fix it when you find it, even if it isn't your change.
 bundles/acme-knowledge/             internal knowledge bundle (the demo corpus)
 bundles/acme-knowledge-restricted/  restricted bundle (separate repo in production)
 src/okf_mcp/parser.py               frontmatter + link extraction
-src/okf_mcp/index.py                in-memory index: lookup, search, follow_links
+src/okf_mcp/index.py                in-memory index: lookup, search, follow_links,
+                                    per-session scope filtering (visible_to)
+src/okf_mcp/scopes.py               effective-scope resolution + visibility rule
 src/okf_mcp/server.py               MCP server (stdio), tools: get_concept,
                                     search_concepts, list_by_type, follow_links
 src/okf_mcp/validator.py            bundle validator CLI (okf-validate)
@@ -61,3 +63,7 @@ CI runs lint, tests, and the validator on every push — all three must pass.
   adding tools — it is the context-size guarantee.
 - **Sensitivity = bundle separation.** Never move restricted concepts into the
   internal bundle or serve both to one unscoped session.
+- **Scopes bind at session start, never from tool input.** Enforcement is pure
+  set intersection over the per-session filtered index (`OkfIndex.visible_to`);
+  every serving path must go through that view, and no MCP tool may ever accept
+  scope labels as a parameter.

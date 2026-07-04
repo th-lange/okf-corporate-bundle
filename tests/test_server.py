@@ -51,6 +51,20 @@ async def test_mcp_server_exposes_expected_tools() -> None:
     assert tools == {"get_concept", "list_by_type", "search_concepts", "follow_links"}
 
 
+@pytest.mark.anyio
+async def test_server_scope_gates_restricted_bundle() -> None:
+    bundles = [BUNDLE, REPO_ROOT / "bundles" / "acme-knowledge-restricted"]
+    concept = {"concept_id": "/methods/churn-propensity-model"}
+
+    exco = build_server(bundles, scopes=["exco"])
+    result = await exco.call_tool("get_concept", concept)
+    assert "Churn Propensity" in result[0].text
+
+    public = build_server(bundles, scopes=[])
+    with pytest.raises(Exception, match="Unknown concept id"):
+        await public.call_tool("get_concept", concept)
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
