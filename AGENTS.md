@@ -31,8 +31,10 @@ src/okf_mcp/server.py               MCP server (stdio), tools: get_concept,
                                     search_concepts, list_by_type, follow_links
 src/okf_mcp/validator.py            bundle validator CLI (okf-validate)
 src/okf_mcp/ingest/                 okf-ingest: Source connectors (sources.py),
-                                    Transformer seam (transform.py), core loop, CLI
+                                    Transformer seam (transform.py), ledger
+                                    (ledger.py), core loop, CLI (run / status)
 config/ingest.yaml                  ingest source configuration
+ingest/ledger.yaml                  committed ledger: source doc → revision, draft
 tests/                              pytest suite, one file per feature
 docs/usage.md                       usage doc, do's and don'ts
 ```

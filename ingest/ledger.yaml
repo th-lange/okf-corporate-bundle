@@ -1,0 +1,27 @@
+# okf-ingest ledger — maintained by `okf-ingest`, committed for visibility.
+# One entry per source document: where it came from, at which revision,
+# and which draft it produced. Entries are never auto-deleted; documents
+# that vanish upstream are flagged with `removed_at`.
+documents:
+  /tmp/pytest-of-letigre/pytest-18/test_cli_end_to_end0/handbook#notes/mrr-tips.md:
+    draft: handbook/notes/mrr-tips.md
+    ingested_at: '2026-07-04T13:44:58+00:00'
+    removed_at: '2026-07-04T13:45:38+00:00'
+    revision: ae5dc9272476f1b9910e6e763f8e8804eabc3b69
+    source: handbook
+  /tmp/pytest-of-letigre/pytest-18/test_cli_end_to_end0/handbook#plain.md:
+    draft: handbook/plain.md
+    ingested_at: '2026-07-04T13:44:58+00:00'
+    removed_at: '2026-07-04T13:45:38+00:00'
+    revision: ae5dc9272476f1b9910e6e763f8e8804eabc3b69
+    source: handbook
+  /tmp/pytest-of-letigre/pytest-19/test_cli_end_to_end0/handbook#notes/mrr-tips.md:
+    draft: handbook/notes/mrr-tips.md
+    ingested_at: '2026-07-04T13:45:38+00:00'
+    revision: cd6a95555fb458ca2e15b15b91a9ab64bbd25607
+    source: handbook
+  /tmp/pytest-of-letigre/pytest-19/test_cli_end_to_end0/handbook#plain.md:
+    draft: handbook/plain.md
+    ingested_at: '2026-07-04T13:45:38+00:00'
+    revision: cd6a95555fb458ca2e15b15b91a9ab64bbd25607
+    source: handbook

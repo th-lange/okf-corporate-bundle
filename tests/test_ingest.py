@@ -1,50 +1,15 @@
 """Ingest tracer bullet (issue #15): git source → provenance-stamped drafts."""
 
-import subprocess
 from datetime import datetime
 from pathlib import Path
 
-import pytest
+from conftest import PLAIN, git
 
 from okf_mcp.ingest import GitSource, PassthroughTransformer, ingest
 from okf_mcp.ingest.cli import main as ingest_main
 from okf_mcp.ingest.sources import SourceDocument
 from okf_mcp.parser import parse_document, split_frontmatter
 from okf_mcp.validator import _check_document
-
-NOTE = """---
-type: Note
-title: MRR tips
----
-
-# MRR tips
-
-Watch the grain.
-"""
-
-PLAIN = "# Just prose\n\nNo frontmatter at all.\n"
-
-
-def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(
-        ["git", "-c", "user.email=t@t.test", "-c", "user.name=t", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-
-
-@pytest.fixture()
-def source_repo(tmp_path: Path) -> Path:
-    repo = tmp_path / "handbook"
-    (repo / "notes").mkdir(parents=True)
-    (repo / "notes" / "mrr-tips.md").write_text(NOTE)
-    (repo / "plain.md").write_text(PLAIN)
-    _git(repo, "init", "--quiet")
-    _git(repo, "add", ".")
-    _git(repo, "commit", "--quiet", "-m", "seed")
-    return repo
 
 
 def test_git_source_yields_per_document_revisions(source_repo: Path) -> None:
@@ -56,7 +21,7 @@ def test_git_source_yields_per_document_revisions(source_repo: Path) -> None:
 
     # touching one file must not change the other file's revision
     (source_repo / "plain.md").write_text(PLAIN + "\nMore prose.\n")
-    _git(source_repo, "commit", "--quiet", "-am", "edit plain")
+    git(source_repo, "commit", "--quiet", "-am", "edit plain")
     docs2 = {d.relative_path: d for d in source.documents()}
     assert docs2["plain.md"].revision != first_rev
     assert docs2["notes/mrr-tips.md"].revision == docs["notes/mrr-tips.md"].revision

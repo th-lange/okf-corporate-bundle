@@ -83,7 +83,8 @@ and record the change in the bundle's `log.md`.
 **draft** concepts — it never writes into a served bundle:
 
 ```bash
-uv run okf-ingest                  # uses config/ingest.yaml
+uv run okf-ingest                  # ingest new/modified docs (config/ingest.yaml)
+uv run okf-ingest status           # what's new / unchanged / modified / removed
 uv run okf-ingest --config my.yaml
 ```
 
@@ -96,6 +97,15 @@ from), and `ingested_at:`. Documents without frontmatter get `type: Document`
 so drafts always pass validation; a `Transformer` seam
 (`src/okf_mcp/ingest/transform.py`) is where smarter conversion plugs in
 later.
+
+The **ledger** (`ingest/ledger.yaml`, committed) gives full visibility into
+what has been ingested: one entry per source document with its URI, revision,
+draft path, and ingest time. `okf-ingest status` compares current source
+revisions against it and classifies every document as new / unchanged /
+modified / removed. Re-running ingest regenerates drafts **only** for new and
+modified documents; documents that vanished upstream are flagged in the
+ledger (`removed_at`) and reported — never deleted. Retiring the concept a
+removed document produced is a human decision.
 
 The staging directory is gitignored on purpose: drafts reach a bundle only by
 a human reviewing them, moving them in, and opening a normal PR.
