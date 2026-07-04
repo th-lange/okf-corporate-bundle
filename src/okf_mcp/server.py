@@ -1,12 +1,17 @@
-"""MCP server (stdio) exposing an OKF bundle to agents.
+"""MCP server (stdio) exposing OKF bundles to agents, scoped per session.
 
-Bundle selection: the OKF_BUNDLE_DIR environment variable, defaulting to
-`bundles/acme-knowledge` relative to the repository root.
+Bundle selection: OKF_BUNDLE_DIRS (os.pathsep-separated list; OKF_BUNDLE_DIR
+also accepted), defaulting to both demo bundles under `bundles/`.
+
+Scope binding: the session's scope set comes from OKF_SCOPES (comma-separated
+labels) and is bound once, at server start — never from tool input, so prompt
+content can never widen visibility. No scopes means public-layer only.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -14,12 +19,24 @@ from mcp.server.fastmcp import FastMCP
 from okf_mcp.index import OkfIndex, UnknownConceptError, full, summary
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_BUNDLE = _REPO_ROOT / "bundles" / "acme-knowledge"
+_DEFAULT_BUNDLES = (
+    _REPO_ROOT / "bundles" / "acme-knowledge",
+    _REPO_ROOT / "bundles" / "acme-knowledge-restricted",
+)
 
 
-def build_server(bundle_dir: Path | None = None) -> FastMCP:
-    bundle_dir = bundle_dir or Path(os.environ.get("OKF_BUNDLE_DIR", _DEFAULT_BUNDLE))
-    index = OkfIndex(bundle_dir)
+def build_server(
+    bundle_dirs: Path | Sequence[Path] | None = None,
+    scopes: Iterable[str] | None = None,
+) -> FastMCP:
+    if bundle_dirs is None:
+        raw = os.environ.get("OKF_BUNDLE_DIRS") or os.environ.get("OKF_BUNDLE_DIR")
+        bundle_dirs = [Path(p) for p in raw.split(os.pathsep)] if raw else _DEFAULT_BUNDLES
+    if isinstance(bundle_dirs, Path):
+        bundle_dirs = [bundle_dirs]
+    if scopes is None:
+        scopes = [s.strip() for s in os.environ.get("OKF_SCOPES", "").split(",") if s.strip()]
+    index = OkfIndex(*bundle_dirs).visible_to(scopes)
     mcp = FastMCP(
         "okf-knowledge",
         instructions=(
@@ -27,7 +44,9 @@ def build_server(bundle_dir: Path | None = None) -> FastMCP:
             "Concept ids are bundle-relative paths like "
             "/metrics/monthly-recurring-revenue. Use list_by_type or the id "
             "from another concept's links to find concepts, then get_concept "
-            "for the authoritative definition."
+            "for the authoritative definition. Results are limited to this "
+            "session's authorization scope; concepts outside it do not exist "
+            "from your point of view."
         ),
     )
 

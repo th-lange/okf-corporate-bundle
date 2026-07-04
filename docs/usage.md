@@ -10,9 +10,15 @@ uv sync
 uv run okf-mcp        # stdio transport
 ```
 
-The server exposes one bundle, selected by the `OKF_BUNDLE_DIR` environment
-variable (default: `bundles/acme-knowledge`). Example Claude Code registration
-(`.mcp.json`):
+Two environment variables configure a session:
+
+- `OKF_BUNDLE_DIRS` — bundle directories to serve, separated by the OS path
+  separator (`:` on Linux/macOS). Default: both demo bundles.
+- `OKF_SCOPES` — comma-separated scope labels for this session, bound once at
+  startup. Unset means public-layer only. No tool accepts scopes as input, so
+  prompt content can never widen visibility.
+
+Example Claude Code registration (`.mcp.json`) for a growth-scoped session:
 
 ```json
 {
@@ -20,7 +26,7 @@ variable (default: `bundles/acme-knowledge`). Example Claude Code registration
     "okf-knowledge": {
       "command": "uv",
       "args": ["run", "okf-mcp"],
-      "env": { "OKF_BUNDLE_DIR": "bundles/acme-knowledge" }
+      "env": { "OKF_SCOPES": "growth" }
     }
   }
 }
@@ -58,6 +64,23 @@ owner: /teams/growth            # every concept names an owning team
 timestamp: 2026-07-03T09:00:00Z
 ---
 ```
+
+### Scoping
+
+Visibility is controlled by scope labels, resolved with layered defaults:
+a concept's own `scope:` list wins; otherwise the nearest ancestor `index.md`
+with a `scope_default:` applies, falling back to the bundle root's default and
+finally to `public`. A concept is visible when its effective scope contains
+`public` or intersects the caller's scope set — there is no hierarchy logic;
+broader roles simply hold more scopes.
+
+Prefer directory-level `scope_default:` (set it in the directory's `index.md`)
+and use concept-level `scope:` only for deliberate exceptions — e.g. MRR is
+explicitly `public` while `metrics/` defaults to `growth`. Out-of-scope
+concepts are omitted entirely: they cannot be listed, searched, retrieved, or
+reached via `follow_links`, and look exactly like ids that don't exist.
+
+### Links
 
 Link with bundle-absolute markdown links (`[MRR term](/glossary/mrr)`), and name
 the relationship in the surrounding prose ("computed from", "owned by",

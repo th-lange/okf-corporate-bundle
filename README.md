@@ -51,6 +51,7 @@ bundles/
 src/okf_mcp/                    MCP server package
 ├── parser.py                   frontmatter + link extraction
 ├── index.py                    in-memory index: lookup, search, graph traversal
+├── scopes.py                   effective-scope resolution + visibility rule
 ├── server.py                   MCP server (stdio) exposing the tools
 └── validator.py                bundle validator CLI (also run in CI)
 docs/usage.md                   how to run, author, and consume the bundles
@@ -64,8 +65,13 @@ tests/
 
 ## The MCP server
 
-`okf-mcp` (stdio transport) serves one bundle, selected via `OKF_BUNDLE_DIR`
-(default: `bundles/acme-knowledge`). Current tools:
+`okf-mcp` (stdio transport) serves one or more bundles (`OKF_BUNDLE_DIRS`,
+default: both demo bundles) behind set-based scope enforcement: the session's
+scope set (`OKF_SCOPES`) is bound once at startup, and concepts outside it are
+omitted from every tool — they cannot be listed, searched, retrieved, or
+reached via `follow_links`, and lookups fail exactly like missing ids. No tool
+accepts scopes as input, so prompt content can never widen visibility.
+Current tools:
 
 | Tool | Answers |
 |---|---|
