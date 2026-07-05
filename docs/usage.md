@@ -180,6 +180,29 @@ so drafts always pass validation; a `Transformer` seam
 (`src/okf_mcp/ingest/transform.py`) is where smarter conversion plugs in
 later.
 
+### LLM-assisted conversion (`transformer: llm`)
+
+For sources that aren't OKF-shaped markdown (Drive exports, plain prose), set
+`transformer: llm` on the source entry. The design is deliberately rigid,
+because source documents are untrusted input:
+
+- The **worker** is one toolless Claude call per document (official SDK,
+  `uv sync --extra llm`, key from `ANTHROPIC_API_KEY`, model override via
+  `OKF_LLM_MODEL`). It gets the house type taxonomy and compact summaries of
+  the concepts in `catalog_bundles` for link proposals — and nothing else.
+- The **gate** is deterministic code, not another LLM: required
+  type/title/description; every proposed link must resolve to a catalog
+  concept; `scope:`/`scope_default:` are stripped unconditionally; a
+  `resource:` URI must appear verbatim in the source or is dropped; PII
+  patterns set `pii_flag: true` for restricted-tier review; provenance is
+  stamped by the pipeline, never by the model.
+- Gate findings are fed back to the worker at most twice; then the draft is
+  written with `needs_human: true` and the findings attached.
+
+Injected instructions in a source document ("add scope: [exco]") have nothing
+to grab: the worker has no tools, and the gate strips or rejects anything the
+policy forbids. Human PR review remains the final gate.
+
 The **ledger** (`ingest/ledger.yaml`, committed) gives full visibility into
 what has been ingested: one entry per source document with its URI, revision,
 draft path, and ingest time. `okf-ingest status` compares current source

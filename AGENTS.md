@@ -42,8 +42,9 @@ src/okf_mcp/server.py               MCP server (stdio), tools: get_concept,
 src/okf_mcp/validator.py            bundle validator CLI (okf-validate)
 src/okf_mcp/ingest/                 okf-ingest: Source connectors (sources.py: git,
                                     drive.py: gdrive, s3.py: s3), Transformer seam
-                                    (transform.py), ledger (ledger.py), core loop,
-                                    CLI (run / status)
+                                    (transform.py: passthrough, llm.py: toolless
+                                    worker + deterministic gate), ledger (ledger.py),
+                                    core loop, CLI (run / status)
 config/ingest.yaml                  ingest source configuration
 ingest/ledger.yaml                  committed ledger: source doc → revision, draft
 tests/                              pytest suite, one file per feature
@@ -78,6 +79,10 @@ CI runs lint, tests, and the validator on every push — all three must pass.
 - **The ingester proposes, never publishes.** okf-ingest writes drafts to the
   staging dir only; never point it at `bundles/`, and never commit drafts
   unreviewed.
+- **The LLM worker stays toolless and the gate stays deterministic.** Source
+  documents are untrusted input; never give the ingest worker tools, never
+  replace the gate's policy checks with model judgment, and never let model
+  output set scopes, provenance, or unverified resource URIs.
 - **Operator ≠ knowledge.** This repo is the tool; real knowledge lives under
   `OKF_KNOWLEDGE_ROOT` (bundles, staging, ledger). The in-repo `bundles/` are
   demo fixtures. Never write ingest state or knowledge into the operator repo,

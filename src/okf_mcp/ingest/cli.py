@@ -14,11 +14,13 @@ the knowledge, never in the operator repo:
 
     staging_dir: ingest/drafts
     ledger: ingest/ledger.yaml
+    catalog_bundles: [bundles/acme-knowledge]   # link targets for the llm transformer
     sources:
       - name: handbook
         type: git
         url: https://example.com/acme/handbook.git
         paths: ["docs/**/*.md"]
+        transformer: llm    # default: passthrough
 
 `run` regenerates drafts only for new and modified documents. Documents that
 vanished upstream are flagged in the ledger (`removed_at`) and reported —
@@ -35,15 +37,20 @@ from pathlib import Path
 
 import yaml
 
+from okf_mcp.index import OkfIndex
 from okf_mcp.ingest.core import write_draft
 from okf_mcp.ingest.drive import DriveSource
 from okf_mcp.ingest.ledger import Ledger
+from okf_mcp.ingest.llm import ClaudeClient, LlmError, LlmTransformer
 from okf_mcp.ingest.s3 import S3Source
 from okf_mcp.ingest.sources import GitSource, Source, SourceDocument
-from okf_mcp.ingest.transform import PassthroughTransformer
+from okf_mcp.ingest.transform import PassthroughTransformer, Transformer
 from okf_mcp.knowledge import REPO_ROOT, KnowledgeRootError, knowledge_root
 from okf_mcp.parser import FrontmatterError, parse_document
 from okf_mcp.validator import _check_document
+
+_DEFAULT_CATALOG = (REPO_ROOT / "bundles" / "acme-knowledge",)
+_TRANSFORMERS = ("passthrough", "llm")
 
 
 def _default_config() -> Path:
@@ -57,9 +64,19 @@ class ConfigError(ValueError):
     """Raised when the ingest config is malformed."""
 
 
-def _build_source(entry: object) -> Source:
+def _build_source(entry: object) -> tuple[Source, str]:
     if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
         raise ConfigError("every source needs at least `name` and `type`")
+    transformer = entry.get("transformer", "passthrough")
+    if transformer not in _TRANSFORMERS:
+        raise ConfigError(
+            f"unknown transformer {transformer!r} for source {entry['name']!r} "
+            f"(known: {', '.join(_TRANSFORMERS)})"
+        )
+    return _build_connector(entry), transformer
+
+
+def _build_connector(entry: dict) -> Source:
     kind = entry.get("type")
     if kind == "git":
         if not isinstance(entry.get("url"), str):
@@ -82,7 +99,7 @@ def _build_source(entry: object) -> Source:
     )
 
 
-def load_config(path: Path) -> tuple[Path, Path, list[Source]]:
+def load_config(path: Path) -> tuple[Path, Path, list[tuple[Source, str]], tuple[Path, ...]]:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict) or not isinstance(raw.get("sources"), list):
         raise ConfigError(f"{path}: ingest config must have a `sources` list")
@@ -91,15 +108,47 @@ def load_config(path: Path) -> tuple[Path, Path, list[Source]]:
     base = knowledge_root() or Path.cwd()
     staging_dir = base / Path(raw.get("staging_dir", "ingest/drafts"))
     ledger_path = base / Path(raw.get("ledger", "ingest/ledger.yaml"))
-    return staging_dir, ledger_path, [_build_source(entry) for entry in raw["sources"]]
+    catalog = tuple(base / Path(p) for p in raw.get("catalog_bundles", [])) or _DEFAULT_CATALOG
+    return staging_dir, ledger_path, [_build_source(e) for e in raw["sources"]], catalog
+
+
+def _build_transformers(
+    pairs: list[tuple[Source, str]], catalog_bundles: tuple[Path, ...]
+) -> dict[str, Transformer]:
+    """One transformer per source name; the LLM worker is built only if used."""
+    transformers: dict[str, Transformer] = {}
+    passthrough = PassthroughTransformer()
+    llm: LlmTransformer | None = None
+    for source, kind in pairs:
+        if kind == "llm":
+            if llm is None:
+                index = OkfIndex(*catalog_bundles)
+                known = {
+                    doc.id: f"{doc.type} — {doc.frontmatter.get('title')}: "
+                    f"{doc.frontmatter.get('description')}"
+                    for doc in (index.get_concept(cid) for cid in index.ids())
+                }
+                llm = LlmTransformer(
+                    client=ClaudeClient.from_env(),
+                    known_concepts=known,
+                    type_names=tuple(index.types()) or ("Document",),
+                )
+            transformers[source.name] = llm
+        else:
+            transformers[source.name] = passthrough
+    return transformers
 
 
 def _pull(sources: list[Source]) -> list[tuple[Source, SourceDocument]]:
     return [(source, doc) for source in sources for doc in source.documents()]
 
 
-def _run(staging_dir: Path, ledger: Ledger, sources: list[Source]) -> int:
-    transformer = PassthroughTransformer()
+def _run(
+    staging_dir: Path,
+    ledger: Ledger,
+    sources: list[Source],
+    transformers: dict[str, Transformer],
+) -> int:
     written = []
     counts: Counter[str] = Counter()
     seen: set[str] = set()
@@ -108,7 +157,7 @@ def _run(staging_dir: Path, ledger: Ledger, sources: list[Source]) -> int:
         state = ledger.classify(doc.source_uri, doc.revision)
         counts[state] += 1
         if state in ("new", "modified"):
-            draft = write_draft(doc, source.name, staging_dir, transformer)
+            draft = write_draft(doc, source.name, staging_dir, transformers[source.name])
             rel = draft.path.relative_to(staging_dir).as_posix()
             ledger.record(doc.source_uri, source.name, rel, doc.revision)
             written.append(draft)
@@ -167,15 +216,17 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         config_path = args.config if args.config is not None else _default_config()
-        staging_dir, ledger_path, sources = load_config(config_path)
-    except (ConfigError, KnowledgeRootError, FileNotFoundError) as exc:
+        staging_dir, ledger_path, pairs, catalog_bundles = load_config(config_path)
+        sources = [source for source, _ in pairs]
+        ledger = Ledger.load(ledger_path)
+        if args.command == "status":
+            return _status(ledger, sources)
+        transformers = _build_transformers(pairs, catalog_bundles)
+    except (ConfigError, KnowledgeRootError, LlmError, FileNotFoundError) as exc:
         print(exc, file=sys.stderr)
         return 2
 
-    ledger = Ledger.load(ledger_path)
-    if args.command == "status":
-        return _status(ledger, sources)
-    return _run(staging_dir, ledger, sources)
+    return _run(staging_dir, ledger, sources, transformers)
 
 
 if __name__ == "__main__":
