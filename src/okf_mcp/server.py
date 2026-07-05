@@ -1,7 +1,10 @@
 """MCP server (stdio) exposing OKF bundles to agents, scoped per session.
 
-Bundle selection: OKF_BUNDLE_DIRS (os.pathsep-separated list; OKF_BUNDLE_DIR
-also accepted), defaulting to both demo bundles under `bundles/`.
+Bundle selection, in order: an explicit OKF_BUNDLE_DIRS list
+(os.pathsep-separated; OKF_BUNDLE_DIR also accepted); otherwise every bundle
+under `$OKF_KNOWLEDGE_ROOT/bundles/`; otherwise the demo fixtures bundled in
+this repo. The operator never requires knowledge inside its own tree — see
+okf_mcp.knowledge for the operator/knowledge separation.
 
 Scope binding: the session's scope set is resolved once, at server start —
 never from tool input, so prompt content can never widen visibility. OKF_TOKEN
@@ -25,14 +28,24 @@ from mcp.server.fastmcp import FastMCP
 from okf_mcp.auth import ANONYMOUS, Authenticator, Principal, StaticTokenAuthenticator
 from okf_mcp.authz import AuditLog, ResourceAuthorizer
 from okf_mcp.index import OkfIndex, UnknownConceptError, full, summary
+from okf_mcp.knowledge import REPO_ROOT, discover_bundles, knowledge_root
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_BUNDLES = (
-    _REPO_ROOT / "bundles" / "acme-knowledge",
-    _REPO_ROOT / "bundles" / "acme-knowledge-restricted",
+    REPO_ROOT / "bundles" / "acme-knowledge",
+    REPO_ROOT / "bundles" / "acme-knowledge-restricted",
 )
-_DEFAULT_AUTH_CONFIG = _REPO_ROOT / "config" / "auth.yaml"
-_DEFAULT_RESOURCE_CONFIG = _REPO_ROOT / "config" / "resources.yaml"
+_DEFAULT_AUTH_CONFIG = REPO_ROOT / "config" / "auth.yaml"
+_DEFAULT_RESOURCE_CONFIG = REPO_ROOT / "config" / "resources.yaml"
+
+
+def _default_bundle_dirs() -> Sequence[Path]:
+    raw = os.environ.get("OKF_BUNDLE_DIRS") or os.environ.get("OKF_BUNDLE_DIR")
+    if raw:
+        return [Path(p) for p in raw.split(os.pathsep)]
+    root = knowledge_root()
+    if root is not None:
+        return discover_bundles(root)
+    return _DEFAULT_BUNDLES
 
 
 def _resolve_principal(
@@ -63,8 +76,7 @@ def build_server(
     audit_log: AuditLog | None = None,
 ) -> FastMCP:
     if bundle_dirs is None:
-        raw = os.environ.get("OKF_BUNDLE_DIRS") or os.environ.get("OKF_BUNDLE_DIR")
-        bundle_dirs = [Path(p) for p in raw.split(os.pathsep)] if raw else _DEFAULT_BUNDLES
+        bundle_dirs = _default_bundle_dirs()
     if isinstance(bundle_dirs, Path):
         bundle_dirs = [bundle_dirs]
     principal = _resolve_principal(scopes, authenticator, token)

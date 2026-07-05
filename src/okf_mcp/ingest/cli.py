@@ -6,7 +6,11 @@ Commands:
     okf-ingest status    classify every document (new / unchanged / modified
                          / removed) against the ledger, changing nothing
 
-Config (YAML, default `config/ingest.yaml`):
+Config (YAML). Default location: `$OKF_KNOWLEDGE_ROOT/ingest.yaml` when a
+knowledge root is configured, else the demo `config/ingest.yaml` in this
+repo. Relative `staging_dir`/`ledger` paths resolve against the knowledge
+root when set (else the current directory), so all ingest state lives with
+the knowledge, never in the operator repo:
 
     staging_dir: ingest/drafts
     ledger: ingest/ledger.yaml
@@ -37,10 +41,16 @@ from okf_mcp.ingest.ledger import Ledger
 from okf_mcp.ingest.s3 import S3Source
 from okf_mcp.ingest.sources import GitSource, Source, SourceDocument
 from okf_mcp.ingest.transform import PassthroughTransformer
+from okf_mcp.knowledge import REPO_ROOT, KnowledgeRootError, knowledge_root
 from okf_mcp.parser import FrontmatterError, parse_document
 from okf_mcp.validator import _check_document
 
-_DEFAULT_CONFIG = Path("config/ingest.yaml")
+
+def _default_config() -> Path:
+    root = knowledge_root()
+    if root is not None:
+        return root / "ingest.yaml"
+    return REPO_ROOT / "config" / "ingest.yaml"
 
 
 class ConfigError(ValueError):
@@ -76,8 +86,11 @@ def load_config(path: Path) -> tuple[Path, Path, list[Source]]:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict) or not isinstance(raw.get("sources"), list):
         raise ConfigError(f"{path}: ingest config must have a `sources` list")
-    staging_dir = Path(raw.get("staging_dir", "ingest/drafts"))
-    ledger_path = Path(raw.get("ledger", "ingest/ledger.yaml"))
+    # Ingest state belongs with the knowledge: relative paths resolve against
+    # the knowledge root when one is configured, never the operator repo.
+    base = knowledge_root() or Path.cwd()
+    staging_dir = base / Path(raw.get("staging_dir", "ingest/drafts"))
+    ledger_path = base / Path(raw.get("ledger", "ingest/ledger.yaml"))
     return staging_dir, ledger_path, [_build_source(entry) for entry in raw["sources"]]
 
 
@@ -144,13 +157,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Ingest sources into draft OKF concepts.")
     parser.add_argument("command", nargs="?", choices=("run", "status"), default="run")
     parser.add_argument(
-        "--config", type=Path, default=_DEFAULT_CONFIG, help="ingest config file"
+        "--config",
+        type=Path,
+        default=None,
+        help="ingest config file (default: $OKF_KNOWLEDGE_ROOT/ingest.yaml, "
+        "else the repo's demo config)",
     )
     args = parser.parse_args(argv)
 
     try:
-        staging_dir, ledger_path, sources = load_config(args.config)
-    except (ConfigError, FileNotFoundError) as exc:
+        config_path = args.config if args.config is not None else _default_config()
+        staging_dir, ledger_path, sources = load_config(config_path)
+    except (ConfigError, KnowledgeRootError, FileNotFoundError) as exc:
         print(exc, file=sys.stderr)
         return 2
 
