@@ -13,9 +13,10 @@ timestamp: 2026-07-04T09:00:00Z
 A **separate repo** from `acme-knowledge` (the internal bundle). Same OKF format, different
 blast radius: trade-secret methods, patents, and raw PII. Governed by [access policy](/access).
 
-**Cross-bundle references** use `bundle:/concept/id` notation
-(e.g. `acme-knowledge:/metrics/logo-churn-rate`), resolved by the MCP layer for callers holding
-`restricted` scope — never by plain markdown links, which are bundle-local.
+**Cross-bundle references** use `bundle:/concept/id` link targets
+(e.g. `[logo churn rate](acme-knowledge:/metrics/logo-churn-rate)`), resolved by the MCP layer
+only when the named bundle is served **and** the target is within the caller's scopes — the
+edge exists only for callers who can see both sides.
 
 ## Directories
 - [Methods](/methods) — proprietary algorithms & models (trade secrets)

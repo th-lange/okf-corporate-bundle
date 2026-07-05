@@ -5,12 +5,12 @@ description: Raw, unmasked account dimension including PII. Restricted — never
 resource: bigquery://acme-restricted/pii/dim_account_raw
 classification: restricted
 tags: [pii, restricted, account]
-timestamp: 2026-07-03T09:00:00Z
+timestamp: 2026-07-04T09:00:00Z
 ---
 
 # dim_account_raw
 
-Raw source of the masked, internal `acme-knowledge:/data/tables/dim-account`.
+Raw source of the masked, internal [dim_account](acme-knowledge:/data/tables/dim-account).
 
 PII columns (`full_name`, `email`, `billing_address`) exist **only** here. The internal bundle
 exposes derived/masked columns; the MCP layer denies these raw columns to any non-`restricted` caller.

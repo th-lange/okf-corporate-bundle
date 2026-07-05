@@ -6,12 +6,12 @@ resource: git://acme-restricted/pricing/engine
 owner: acme-knowledge:/teams/growth
 classification: restricted
 tags: [ip, pricing, trade-secret]
-timestamp: 2026-07-03T09:00:00Z
+timestamp: 2026-07-04T09:00:00Z
 ---
 
 # Dynamic Pricing Engine
 
 Sets per-segment pricing from willingness-to-pay signals. **Trade secret.**
 
-**Priced through (cross-bundle):** `acme-knowledge:/systems/billing-api`.
+**Priced through (cross-bundle):** [billing-api](acme-knowledge:/systems/billing-api).
 **Covered in part by:** [US-11234567](/patents/us-11234567-adaptive-ingestion) *(ingestion path only)*.
