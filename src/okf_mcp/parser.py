@@ -16,8 +16,10 @@ import yaml
 
 RESERVED_NAMES = frozenset({"index.md", "log.md"})
 
-# Bundle-absolute markdown links: ](/path/to/concept) — external URLs don't match.
-_LINK_RE = re.compile(r"\]\((/[^)#\s]+)")
+# Concept links: bundle-absolute ](/path/to/concept) and qualified cross-bundle
+# ](bundle-name:/path/to/concept). URL schemes (https://, git://, bigquery://)
+# carry `//` after the colon and don't match.
+_LINK_RE = re.compile(r"\]\(((?:[A-Za-z0-9][A-Za-z0-9._-]*:)?/(?!/)[^)#\s]+)")
 _FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?", re.DOTALL)
 
 

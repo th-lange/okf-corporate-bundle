@@ -14,8 +14,11 @@ Environment variables configure a session; everything is bound once at
 startup and no tool accepts scopes or tokens as input, so prompt content can
 never widen visibility:
 
-- `OKF_BUNDLE_DIRS` — bundle directories to serve, separated by the OS path
-  separator (`:` on Linux/macOS). Default: both demo bundles.
+- `OKF_KNOWLEDGE_ROOT` — the external knowledge tree (see
+  [Deployment](#deployment)); every bundle under `<root>/bundles/` is served.
+- `OKF_BUNDLE_DIRS` — explicit bundle list, separated by the OS path
+  separator (`:` on Linux/macOS); overrides the knowledge root. With neither
+  set, the repo's demo fixtures are served.
 - `OKF_TOKEN` — bearer token, resolved to a scope set by the auth layer.
 - `OKF_AUTH_CONFIG` — auth config path (default: `config/auth.yaml`).
 - `OKF_SCOPES` — comma-separated scope labels; local dev override used only
@@ -121,6 +124,16 @@ Link with bundle-absolute markdown links (`[MRR term](/glossary/mrr)`), and name
 the relationship in the surrounding prose ("computed from", "owned by",
 "on break: see runbook"). The link asserts the relationship; the prose types it.
 
+**Cross-bundle references** use the qualified form
+`[logo churn rate](acme-knowledge:/metrics/logo-churn-rate)` — the prefix is
+the bundle's directory name. The MCP layer resolves these only when the named
+bundle is served *and* the target is within the caller's scopes: the edge
+exists only for callers who can see both sides, and for everyone else there is
+no trace of it. Links into bundles a session doesn't serve are inert (bundles
+stay independently shippable); `okf-validate` cross-checks qualified links
+when the named bundle is part of the same validation run, and skips them when
+a bundle is validated alone.
+
 The house taxonomy maps directories to types and to the question each answers:
 `glossary/` (Term), `metrics/` (Metric), `data/` (BigQuery Table, Dataset),
 `systems/` (Service, API Endpoint), `runbooks/` (Runbook), `playbooks/`
@@ -201,6 +214,45 @@ removed document produced is a human decision.
 
 The staging directory is gitignored on purpose: drafts reach a bundle only by
 a human reviewing them, moving them in, and opening a normal PR.
+
+## Deployment
+
+This repo is the **operator** — a self-contained tool. The **knowledge** it
+serves lives outside, under a single knowledge root (`OKF_KNOWLEDGE_ROOT`):
+
+```
+<knowledge-root>/            typically a mounted volume; each bundle its own
+├── bundles/                 git repo in production (per sensitivity tier)
+│   ├── acme-knowledge/
+│   └── acme-knowledge-restricted/
+├── ingest.yaml              ingest source configuration
+└── ingest/
+    ├── drafts/              staging written by okf-ingest
+    └── ledger.yaml          ingest ledger
+```
+
+With a root configured, the server serves every bundle under
+`<root>/bundles/`, and okf-ingest reads `<root>/ingest.yaml` and keeps its
+staging and ledger under the root — the operator never writes into its own
+tree. Foreign sources (git repos, Drive folders, S3 buckets) flow in through
+the ingester; the knowledge root is where their drafts and provenance land.
+Without a root, the bundled demo fixtures keep the fresh-clone experience
+working.
+
+Containerized:
+
+```bash
+docker build -t okf-operator .
+docker run -i --rm \
+  -v /srv/acme-knowledge:/knowledge \
+  -e OKF_KNOWLEDGE_ROOT=/knowledge \
+  -e OKF_TOKEN=demo-token-a \
+  okf-operator
+```
+
+(`-i` because MCP speaks over stdio.) Auth and resource-grant configs default
+to the demo files baked into the image; point `OKF_AUTH_CONFIG` /
+`OKF_RESOURCE_CONFIG` at mounted files for real deployments.
 
 ## Do's
 

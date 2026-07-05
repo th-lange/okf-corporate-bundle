@@ -52,6 +52,7 @@ config/auth.yaml                demo token → scope-set assignments (persona us
 config/resources.yaml           per-resource authorization grants (scope → URIs)
 config/ingest.yaml              ingest sources (demo: this repo's own docs/)
 src/okf_mcp/                    MCP server package
+├── knowledge.py                knowledge-root discovery (operator/knowledge separation)
 ├── parser.py                   frontmatter + link extraction
 ├── index.py                    in-memory index: lookup, search, graph traversal
 ├── scopes.py                   effective-scope resolution + visibility rule
@@ -65,10 +66,13 @@ docs/usage.md                   how to run, author, and consume the bundles
 tests/
 ```
 
-> **Production note:** the two bundles live side by side here for demo purposes.
-> In a real deployment, sensitivity tiers map to **separate repositories** so access
-> control rides on plain git permissions — `acme-knowledge-restricted` would be its
-> own repo with its own ACL.
+> **Production note — operator vs knowledge:** this repo is the **operator**
+> (server, validator, ingester); the in-repo `bundles/` are demo fixtures only.
+> In a real deployment the knowledge lives under an external **knowledge root**
+> (`OKF_KNOWLEDGE_ROOT`, typically a volume mounted into a container), backed by
+> one git repository per sensitivity tier so access control rides on plain git
+> permissions — and all ingest state (staging drafts, ledger) lives with the
+> knowledge, never in the operator. See [deployment](docs/usage.md#deployment).
 
 ## The MCP server
 

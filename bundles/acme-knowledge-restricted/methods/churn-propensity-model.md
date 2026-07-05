@@ -6,7 +6,7 @@ resource: git://acme-restricted/ml/churn-propensity
 owner: acme-knowledge:/teams/growth
 classification: restricted
 tags: [ip, ml, retention, trade-secret]
-timestamp: 2026-07-03T09:00:00Z
+timestamp: 2026-07-04T09:00:00Z
 ---
 
 # Churn Propensity Model
@@ -15,5 +15,5 @@ Proprietary GBM producing a 0–1 churn-risk score per account. **Trade secret**
 weights, and training recipe are confidential and must never appear in a model prompt or log.
 
 **Consumes raw features from:** [dim_account_raw](/data/dim-account-raw).
-**Scored against (cross-bundle):** `acme-knowledge:/metrics/logo-churn-rate`.
-**Business owner (cross-bundle):** `acme-knowledge:/teams/growth`.
+**Scored against (cross-bundle):** [logo churn rate](acme-knowledge:/metrics/logo-churn-rate).
+**Business owner (cross-bundle):** [Growth](acme-knowledge:/teams/growth).
