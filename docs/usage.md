@@ -91,11 +91,17 @@ type: Metric                    # required — the house taxonomy (see below)
 title: Monthly Recurring Revenue (MRR)
 description: One-line summary shown in search results — keep it tight.
 resource: bigquery://acme-analytics/analytics_core/mrr_daily   # optional: the data this describes
+aliases: [monthly recurring revenue]   # optional: synonyms searchers actually use
 tags: [finance, revenue]
 owner: /teams/growth            # every concept names an owning team
 timestamp: 2026-07-03T09:00:00Z
 ---
 ```
+
+Search is ranked (title and aliases outrank tags, then description, then
+body) and result-limited, so `aliases:` is the recall lever: when an agent
+misses a concept under a reasonable phrasing, add that phrasing as an alias —
+curated, deterministic, and reviewable, no embedding infrastructure needed.
 
 ### Scoping
 

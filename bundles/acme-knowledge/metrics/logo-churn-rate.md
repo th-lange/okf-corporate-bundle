@@ -3,9 +3,10 @@ type: Metric
 title: Logo Churn Rate
 description: Share of active accounts that fully cancelled during the period.
 resource: bigquery://acme-analytics/analytics_core/logo_churn_monthly
+aliases: [customer cancellations, logo churn, account churn]
 tags: [retention, churn]
 owner: /teams/growth
-timestamp: 2026-07-03T09:00:00Z
+timestamp: 2026-07-04T09:00:00Z
 ---
 
 # Logo Churn Rate
