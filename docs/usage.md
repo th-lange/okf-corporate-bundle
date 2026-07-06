@@ -151,7 +151,27 @@ and record the change in the bundle's `log.md`.
 ## Ingesting external documents
 
 `okf-ingest` pulls documents from configured sources and proposes them as
-**draft** concepts — it never writes into a served bundle:
+**draft** concepts — it never writes into a served bundle. The whole system,
+end to end:
+
+```mermaid
+flowchart LR
+  subgraph SRC["Sector-owned sources"]
+    G["git repos"]
+    GD["Google Drive"]
+    S3["S3 buckets"]
+  end
+  G --> CONN
+  GD --> CONN
+  S3 --> CONN
+  CONN["Source connectors<br/>provenance: uri + revision"] --> LED{{"Ledger<br/>new / unchanged / modified / removed"}}
+  LED -- "new + modified only" --> TR["Transformer<br/>passthrough, or LLM worker + deterministic gate"]
+  TR --> ST["staging: ingest/drafts/<br/>(never a served bundle)"]
+  ST -- "human review (PR)" --> KB[("knowledge root<br/>OKF bundles")]
+  KB --> MCP["okf-mcp → agents"]
+  style ST fill:#fef9c3,stroke:#eab308,color:#713f12
+  style KB fill:#dcfce7,stroke:#22c55e,color:#14532d
+```
 
 ```bash
 uv run okf-ingest                  # ingest new/modified docs (config/ingest.yaml)
@@ -172,7 +192,60 @@ Available types — new connectors implement the `Source` protocol in
   `drive.readonly` scope) — never from config files.
 - `s3` — `bucket` + optional `prefix`; `*.md` objects only. Revision = the
   object's ETag. Requires the `s3` extra (`uv sync --extra s3`); credentials
-  come from the standard AWS chain (env vars, profile, instance role). Every draft lands under
+  come from the standard AWS chain (env vars, profile, instance role).
+
+### Example: federated sector sources
+
+Each sector keeps maintaining knowledge where it already works; the ingest
+config is where their worlds plug in. A realistic multi-sector
+`<knowledge-root>/ingest.yaml`:
+
+```yaml
+staging_dir: ingest/drafts
+ledger: ingest/ledger.yaml
+catalog_bundles: [bundles/acme-knowledge]   # link targets for the llm transformer
+
+sources:
+  # Compliance maintains rules and processes as prose in their own repo.
+  # Prose isn't OKF-shaped → the LLM transformer converts it, behind the
+  # deterministic gate; drafts still go through human review.
+  - name: compliance-handbook
+    type: git
+    url: git@github.com:acme/compliance-handbook.git
+    paths: ["policies/**/*.md", "processes/**/*.md"]
+    transformer: llm
+
+  # Design keeps patterns and templates in a shared Drive folder.
+  # Google Docs are exported to markdown automatically.
+  - name: design-guidelines
+    type: gdrive
+    folder_id: 1AbCdEfGhIjKlMnOpQrStUv
+    transformer: llm
+
+  # Data engineering already exports OKF-shaped runbooks to S3 → passthrough.
+  - name: dataeng-runbooks
+    type: s3
+    bucket: acme-dataeng-docs
+    prefix: runbooks/
+```
+
+Each run lands drafts under `ingest/drafts/<source>/…` and the ledger tracks
+every upstream document per sector. To keep a sector's knowledge gated to its
+own people, review its drafts into a sector directory that carries a scope
+default — e.g. `bundles/acme-knowledge/compliance/index.md` with
+`scope_default: [compliance]` — and grant the scope in the auth config:
+
+```yaml
+# config/auth.yaml (excerpt)
+  - subject: compliance-lead@acme.test
+    token: token-compliance
+    scopes: [compliance]
+```
+
+From that point the inversion is complete for the sector: they author in
+their own repo or Drive, the pipeline proposes, a human reviews, and agents
+holding the `compliance` scope find the rules at the start of their task —
+nobody else ever sees them. Every draft lands under
 `ingest/drafts/<source>/…` stamped with provenance frontmatter: `source:`
 (the per-document source URI), `source_rev:` (the revision it was taken
 from), and `ingested_at:`. Documents without frontmatter get `type: Document`
