@@ -29,6 +29,8 @@ from okf_mcp.auth import ANONYMOUS, Authenticator, Principal, StaticTokenAuthent
 from okf_mcp.authz import AuditLog, ResourceAuthorizer
 from okf_mcp.index import OkfIndex, UnknownConceptError, full, summary
 from okf_mcp.knowledge import REPO_ROOT, discover_bundles, knowledge_root
+from okf_mcp.writeback import ProposalError
+from okf_mcp.writeback import propose_upstream as propose_upstream_change
 
 _DEFAULT_BUNDLES = (
     REPO_ROOT / "bundles" / "acme-knowledge",
@@ -169,9 +171,11 @@ def build_server(
             ) from None
         return [{**summary(doc), "hops": hops, "via": via} for doc, hops, via in reached]
 
-    def _audit(concept_id: str, decision: str, resource: str | None = None) -> None:
+    def _audit(
+        concept_id: str, decision: str, resource: str | None = None, tool: str = "resolve_resource"
+    ) -> None:
         event: dict[str, object] = {
-            "tool": "resolve_resource",
+            "tool": tool,
             "subject": principal.subject,
             "scopes": sorted(principal.scopes),
             "concept_id": concept_id,
@@ -207,6 +211,38 @@ def build_server(
             raise ValueError(f"Access to the resource of {concept_id} is denied for this session.")
         _audit(concept_id, "allow", resource)
         return {"concept_id": concept_id, "resource": resource}
+
+    @mcp.tool()
+    def propose_upstream(concept_id: str, updated_markdown: str, rationale: str) -> dict:
+        """Propose an update to a concept's UPSTREAM source — the owning
+        sector's repository, resolved from the concept's provenance.
+
+        Nothing is written to the knowledge tree and nothing is merged: for
+        git sources the proposal becomes a branch in the sector's repo,
+        authored as this session's principal, for the sector's own review;
+        non-git sources get a recorded suggestion artifact. Scope fields are
+        rejected; a changed resource URI must appear verbatim in the
+        rationale. Every call is audit-logged.
+
+        Args:
+            concept_id: Bundle-relative id of the concept to improve.
+            updated_markdown: The full replacement document (frontmatter + body).
+            rationale: Why this change is right — becomes the commit message.
+        """
+        try:
+            doc = index.get_concept(concept_id)
+        except UnknownConceptError:
+            _audit(concept_id, "unknown-concept", tool="propose_upstream")
+            raise ValueError(f"Unknown concept id {concept_id!r}.") from None
+        try:
+            result = propose_upstream_change(
+                doc, updated_markdown, rationale, principal.subject, knowledge_root()
+            )
+        except ProposalError as exc:
+            _audit(concept_id, "deny", tool="propose_upstream")
+            raise ValueError(str(exc)) from None
+        _audit(concept_id, "allow", result.ref, tool="propose_upstream")
+        return {"kind": result.kind, "ref": result.ref, "pushed": result.pushed}
 
     return mcp
 

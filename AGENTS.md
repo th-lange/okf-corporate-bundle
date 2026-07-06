@@ -40,7 +40,10 @@ config/auth.yaml                    demo persona tokens → scope sets
 config/resources.yaml               resource grants: scope → resolvable URIs
 src/okf_mcp/server.py               MCP server (stdio), tools: get_concept,
                                     search_concepts, list_by_type, follow_links,
-                                    resolve_resource (authz-gated, audit-logged)
+                                    resolve_resource (authz-gated, audit-logged),
+                                    propose_upstream (write-back to sector sources)
+src/okf_mcp/writeback.py            upstream proposals: branch in the owning repo,
+                                    or suggestion artifact for non-git sources
 src/okf_mcp/validator.py            bundle validator CLI (okf-validate)
 src/okf_mcp/ingest/                 okf-ingest: Source connectors (sources.py: git,
                                     drive.py: gdrive, s3.py: s3), Transformer seam
@@ -85,6 +88,10 @@ CI runs lint, tests, and the validator on every push — all three must pass.
   enforces only mechanical rules: validator passes, scope fields never come
   from source content, provenance is stamped by the pipeline, failed
   conversions keep last-known-good and land in quarantine.
+- **Write-back goes upstream, never into the tree.** `propose_upstream`
+  creates a branch in the owning sector's source (or a suggestion artifact
+  for non-git sources); it must never write to `bundles/` and never merge —
+  the sector's review plus the next sync are the only way back in.
 - **The LLM worker stays toolless and the checks stay deterministic.** Source
   documents are untrusted input; never give the ingest worker tools, never
   replace the mechanical checks with model judgment, and never let model

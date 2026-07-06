@@ -48,7 +48,7 @@ flowchart LR
   S3 --> SYNC
   SYNC["okf-ingest sync<br/>connectors · provenance · content hashes<br/>mechanical validation only"] -- "add · replace · remove<br/>one commit per run" --> BRAIN[("Corporate brain<br/>a projection of the sources<br/>validated · scoped")]
   BRAIN -- "MCP: scoped queries" --> AG["Agent doing the work"]
-  AG -. "proposes upstream, into the source (#38)" .-> SECTORS
+  AG -- "propose_upstream: a branch in the<br/>sector's repo, for their review" --> SECTORS
   style BRAIN fill:#dcfce7,stroke:#22c55e,color:#14532d
 ```
 
@@ -111,16 +111,18 @@ would actually plug its sectors in is documented as example configurations —
 compliance in git, design in Drive, data engineering in S3, each with its own
 transformer and scope — in
 [usage → federated sector sources](usage.md#example-federated-sector-sources);
-a runnable multi-sector fixture is deliberately not built. Source-authoritative
-sync itself shipped with #37 — mirroring, hash-keyed identity, atomic commits,
-last-known-good, and the integrity report are implemented, not aspiration.
-The remaining gap between demo and vision:
+a runnable multi-sector fixture is deliberately not built. The rest of the
+vision is implemented, not aspiration:
 
-- **Closing the loop upstream** ([#38](https://github.com/th-lange/okf-corporate-bundle/issues/38))
-  — agents never write to the brain; they propose changes to the owning
-  sector's *source* (a PR in the sector's repo), the sector's own review
-  decides, and the next sync brings accepted knowledge back. The inversion
-  becomes a cycle without ever adding a second author to the brain.
+- **Source-authoritative sync** (#37) — mirroring with hash-keyed identity
+  (rename preservation, resurrection), atomic commits, last-known-good on
+  failed conversions, and the post-sync integrity report.
+- **The loop, closed upstream** (#38) — agents never write to the brain;
+  `propose_upstream` turns what an agent learned into a branch in the owning
+  sector's repo (resolved from provenance, authored as the session
+  principal), the sector's own review decides, and the next sync brings
+  accepted knowledge back. The inversion is a cycle, and the brain still has
+  exactly one author: sync.
 
 And one boundary worth keeping: the brain holds **durable knowledge** —
 definitions, rules, runbooks, decisions — not the work items flowing through

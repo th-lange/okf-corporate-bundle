@@ -123,12 +123,14 @@ Development is issue-driven; every issue carries acceptance criteria. Shipped:
   sources into the knowledge tree — add / replace / remove, hash-keyed
   identity (rename preservation, resurrection), one commit per run,
   last-known-good on failed conversions, post-sync integrity report.
+- **The write-back loop** (#38): `propose_upstream` sends what an agent
+  learned to the owning sector's source as a branch for *their* review; the
+  next sync brings accepted knowledge back — the inversion as a cycle.
 
-Open — the last gap to the [inversion vision](docs/inversion.md): the agent
-write-back loop proposing changes upstream into sector sources (#38); how
-sectors plug in their own sources is documented as
+The [inversion vision](docs/inversion.md) is fully implemented at demo scale;
+how sectors plug in their own sources is documented as
 [example configurations](docs/usage.md#example-federated-sector-sources)
-rather than a runnable demo. See the
+rather than a runnable demo. Future work lands on the
 [issue tracker](https://github.com/th-lange/okf-corporate-bundle/issues).
 
 ## Development

@@ -54,6 +54,7 @@ async def test_mcp_server_exposes_expected_tools() -> None:
         "search_concepts",
         "follow_links",
         "resolve_resource",
+        "propose_upstream",
     }
 
 
