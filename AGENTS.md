@@ -17,6 +17,8 @@ the affected documentation in the same commit/PR:**
 - **docs/usage.md** — when server usage, authoring rules, or the do's/don'ts change.
 - **docs/demo.md** — when tool behaviour, personas, or scope assignments change
   the walkthrough's expected outputs (re-run its commands to confirm).
+- **docs/inversion.md** — when a mechanism it maps (connectors, gate, scopes,
+  provenance) changes shape, or a tracked gap (#36–#38) ships.
 
 A change that lands without its doc updates is incomplete. If you finish a task
 and haven't checked all three files, you are not done. Stale documentation is a
@@ -48,6 +50,7 @@ src/okf_mcp/ingest/                 okf-ingest: Source connectors (sources.py: g
 config/ingest.yaml                  ingest source configuration
 ingest/ledger.yaml                  committed ledger: source doc → revision, draft
 tests/                              pytest suite, one file per feature
+docs/inversion.md                   the "why": inversion of knowledge, vision → mechanism map
 docs/demo.md                        end-to-end demo: MRR investigation + persona visibility
 docs/usage.md                       usage doc, do's and don'ts
 ```

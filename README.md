@@ -5,18 +5,24 @@ A working example of serving corporate knowledge to AI agents: two
 bundles for a fictional B2B SaaS company ("Acme"), plus an MCP server that exposes
 them to agents with set-based, scoped access control.
 
-> **Docs:** [Demo walkthrough](docs/demo.md) · [Usage — do's and don'ts](docs/usage.md) · [Agent entry point](AGENTS.md)
+> **Docs:** [Why — the inversion of knowledge](docs/inversion.md) · [Demo walkthrough](docs/demo.md) · [Usage — do's and don'ts](docs/usage.md) · [Agent entry point](AGENTS.md)
 
-## Why
+## Why: the inversion of knowledge
 
-Most agent inefficiency isn't reasoning failure — it's *context starvation*. An agent
-asked "why did MRR drop?" that doesn't know the company's MRR definition, which table
-backs it, or who owns it will guess, hallucinate a plausible-but-wrong query, or bounce
-the question back to a human. A curated, cross-linked, permissioned knowledge bundle
-removes the starvation: the authoritative answer is one tool call away, and the related
-answers are one link-hop further. Agents *look things up* instead of guessing — and they
-navigate the graph instead of crawling the corpus, so context stays small no matter how
-large the knowledge base grows.
+In the traditional pipeline, documentation is written *after* the work and dumped
+into a wiki — unowned, conflicting, outdated. Agents make that failure mode
+expensive: an agent that doesn't know the company's MRR definition, which table
+backs it, or who owns it will guess, hallucinate a plausible-but-wrong query, or
+bounce the question back to a human. Most agent inefficiency isn't reasoning
+failure — it's *context starvation*.
+
+This repo demonstrates the inversion: each sector **maintains** its knowledge
+(rules, processes, patterns, decisions) as an owned artifact; that knowledge is
+ingested — with provenance, through a human review gate — into a curated,
+scoped, validated **corporate brain**; and agents query the brain over MCP at
+the **start** of every task. Knowledge becomes the pipeline's input, not its
+exhaust. The full argument, with the old-vs-new pipeline diagrams and the
+vision-to-mechanism mapping, is in [docs/inversion.md](docs/inversion.md).
 
 ## What is OKF?
 
@@ -61,6 +67,7 @@ src/okf_mcp/                    MCP server package
 ├── server.py                   MCP server (stdio) exposing the tools
 ├── validator.py                bundle validator CLI (also run in CI)
 └── ingest/                     okf-ingest: Source connectors → provenance-stamped drafts
+docs/inversion.md               the reasoning: knowledge as pipeline input, not exhaust
 docs/demo.md                    end-to-end walkthrough: MRR investigation + personas
 docs/usage.md                   how to run, author, and consume the bundles
 tests/
@@ -97,20 +104,26 @@ visibility. Current tools:
 List-style tools return summaries (id/type/title/description) — never bodies — so
 agents scan cheaply and fetch full text only for the concepts they actually need.
 
-## Roadmap
+## Status & roadmap
 
-Development is issue-driven; every issue carries acceptance criteria and explicit
-blockers. Two independent tracks are open on the
-[issue tracker](https://github.com/th-lange/okf-corporate-bundle/issues):
+Development is issue-driven; every issue carries acceptance criteria. Shipped:
 
-- **Access control** (#6 → #7 → #8 → #9): set-based scope model with layered
-  defaults (public / group / inner-exco), a pluggable token-to-scope-set auth
-  layer, authz-gated `resolve_resource`, and an end-to-end demo walkthrough.
-- **Ingestion** (#15 → #16 → #17/#18): `okf-ingest` CLI pulling documents from
-  configurable sources (git, Google Drive, S3) behind a small `Source` interface,
-  producing provenance-stamped **draft** concepts for human review — the ingester
-  proposes, never publishes — plus a ledger tracking what's ingested and what
-  changed or vanished upstream.
+- **Access control** (#6–#9): set-based scope model with layered defaults,
+  pluggable token-to-scope-set auth, authz-gated `resolve_resource` with audit
+  logging, and the end-to-end demo walkthrough.
+- **Ingestion** (#15–#18): `okf-ingest` pulling from git, Google Drive, and S3
+  behind a small `Source` interface, provenance-stamped drafts for human
+  review, and a ledger tracking what changed or vanished upstream.
+- **Hardening & architecture** (#28–#31): ranked alias-aware search with
+  result limits, the LLM transformer (toolless worker + deterministic gate),
+  operator/knowledge separation with a container story, and scope-gated
+  cross-bundle references.
+
+Open — the gaps between demo and the [inversion vision](docs/inversion.md):
+a federated sector-owned source demo (#36), `okf-ingest propose` promoting
+reviewed drafts into the knowledge repo (#37), and the agent write-back loop
+(#38). See the
+[issue tracker](https://github.com/th-lange/okf-corporate-bundle/issues).
 
 ## Development
 

@@ -151,7 +151,27 @@ and record the change in the bundle's `log.md`.
 ## Ingesting external documents
 
 `okf-ingest` pulls documents from configured sources and proposes them as
-**draft** concepts — it never writes into a served bundle:
+**draft** concepts — it never writes into a served bundle. The whole system,
+end to end:
+
+```mermaid
+flowchart LR
+  subgraph SRC["Sector-owned sources"]
+    G["git repos"]
+    GD["Google Drive"]
+    S3["S3 buckets"]
+  end
+  G --> CONN
+  GD --> CONN
+  S3 --> CONN
+  CONN["Source connectors<br/>provenance: uri + revision"] --> LED{{"Ledger<br/>new / unchanged / modified / removed"}}
+  LED -- "new + modified only" --> TR["Transformer<br/>passthrough, or LLM worker + deterministic gate"]
+  TR --> ST["staging: ingest/drafts/<br/>(never a served bundle)"]
+  ST -- "human review (PR)" --> KB[("knowledge root<br/>OKF bundles")]
+  KB --> MCP["okf-mcp → agents"]
+  style ST fill:#fef9c3,stroke:#eab308,color:#713f12
+  style KB fill:#dcfce7,stroke:#22c55e,color:#14532d
+```
 
 ```bash
 uv run okf-ingest                  # ingest new/modified docs (config/ingest.yaml)
