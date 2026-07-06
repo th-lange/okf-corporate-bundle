@@ -35,7 +35,10 @@ class FakeDriveApi:
 
     def export(self, file_id: str, mime_type: str) -> str:
         assert (file_id, mime_type) == ("doc-1", "text/markdown")
-        return "# Pricing FAQ\n\nExported from a Google Doc.\n"
+        # content varies with the revision so hash-based change detection
+        # sees an edit, not just revision churn
+        rev = self.files[0]["headRevisionId"]
+        return f"# Pricing FAQ\n\nExported from a Google Doc. ({rev})\n"
 
     def download(self, file_id: str) -> str:
         assert file_id == "file-2"
@@ -77,15 +80,17 @@ def test_drafts_and_provenance_via_unchanged_core_loop(
 def test_ledger_states_work_for_drive_documents(source: DriveSource, tmp_path: Path) -> None:
     ledger = Ledger.load(tmp_path / "ledger.yaml")
     for doc in source.documents():
-        assert ledger.classify(doc.source_uri, doc.revision) == "new"
-        ledger.record(doc.source_uri, source.name, doc.relative_path, doc.revision)
+        assert ledger.classify(doc.source_uri, doc.revision, doc.content_sha256) == "new"
+        ledger.record(
+            doc.source_uri, source.name, doc.relative_path, doc.revision, doc.content_sha256
+        )
 
     api = source.api
     assert isinstance(api, FakeDriveApi)
-    api.files[0]["headRevisionId"] = "rev-doc-8"  # doc edited upstream
+    api.files[0]["headRevisionId"] = "rev-doc-8"  # edited upstream (content changes too)
     del api.files[1]  # markdown file removed upstream
 
-    current = {d.source_uri: d.revision for d in source.documents()}
+    current = {d.source_uri: (d.revision, d.content_sha256) for d in source.documents()}
     assert dict(ledger.status(current)) == {
         "gdrive://doc-1": "modified",
         "gdrive://file-2": "removed",

@@ -32,6 +32,10 @@ class PassthroughTransformer:
 
     def transform(self, doc: SourceDocument) -> str:
         frontmatter, body = split_frontmatter(doc.content)
+        # Scoping never comes from source content — visibility is assigned by
+        # directory defaults in the knowledge tree, not by the document.
+        frontmatter.pop("scope", None)
+        frontmatter.pop("scope_default", None)
         frontmatter.setdefault("type", self.default_type)
         frontmatter["source"] = doc.source_uri
         frontmatter["source_rev"] = doc.revision

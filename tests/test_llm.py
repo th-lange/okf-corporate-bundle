@@ -163,8 +163,7 @@ def test_missing_sdk_fails_clearly(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cli_rejects_unknown_transformer(tmp_path: Path, capsys) -> None:
     config = tmp_path / "ingest.yaml"
     config.write_text(
-        f"ledger: {tmp_path / 'ledger.yaml'}\n"
         "sources:\n  - name: x\n    type: git\n    url: .\n    transformer: telepathy\n"
     )
-    assert ingest_main(["run", "--config", str(config)]) == 2
+    assert ingest_main(["sync", "--config", str(config)]) == 2
     assert "unknown transformer" in capsys.readouterr().err

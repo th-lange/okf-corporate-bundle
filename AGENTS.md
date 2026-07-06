@@ -45,10 +45,10 @@ src/okf_mcp/validator.py            bundle validator CLI (okf-validate)
 src/okf_mcp/ingest/                 okf-ingest: Source connectors (sources.py: git,
                                     drive.py: gdrive, s3.py: s3), Transformer seam
                                     (transform.py: passthrough, llm.py: toolless
-                                    worker + deterministic gate), ledger (ledger.py),
-                                    core loop, CLI (run / status)
-config/ingest.yaml                  ingest source configuration
-ingest/ledger.yaml                  committed ledger: source doc → revision, draft
+                                    worker + mechanical checks), hash-keyed ledger
+                                    (ledger.py), sync engine + CLI (sync / status)
+config/ingest.yaml                  demo sync source configuration
+<root>/ingest/ledger.yaml           committed ledger: source doc → hash, concept
 tests/                              pytest suite, one file per feature
 docs/inversion.md                   the "why": inversion of knowledge, vision → mechanism map
 docs/demo.md                        end-to-end demo: MRR investigation + persona visibility
@@ -63,7 +63,7 @@ uv run pytest                            # tests
 uv run ruff check                        # lint (line length 100)
 uv run okf-validate bundles/acme-knowledge bundles/acme-knowledge-restricted
 uv run okf-mcp                           # run the MCP server (stdio); OKF_BUNDLE_DIR selects the bundle
-uv run okf-ingest                        # pull sources into ingest/drafts/ (config/ingest.yaml)
+uv run okf-ingest sync                   # mirror sources into $OKF_KNOWLEDGE_ROOT (source-authoritative)
 ```
 
 CI runs lint, tests, and the validator on every push — all three must pass.
@@ -76,20 +76,24 @@ CI runs lint, tests, and the validator on every push — all three must pass.
   (#15→#16→#17/#18).
 - **One concept per file; the path is the id.** Never rename concept files
   without updating every inbound link; run the validator after touching bundles.
-- **Bundle edits go through PR review** — that includes anything an agent or
-  ingester generates. Update the bundle's `log.md` and the concept's
-  `timestamp:` with content changes.
-- **The ingester proposes, never publishes.** okf-ingest writes drafts to the
-  staging dir only; never point it at `bundles/`, and never commit drafts
-  unreviewed.
-- **The LLM worker stays toolless and the gate stays deterministic.** Source
+- **Fixture bundle edits go through PR review** (this repo's `bundles/` are
+  hand-maintained demo content). Update the bundle's `log.md` and the
+  concept's `timestamp:` with content changes.
+- **Sources are authoritative; sync is mechanical.** The sector's own review
+  is the only editorial gate — sync mirrors sources into the knowledge tree
+  (add / replace / remove, one commit per run, hash-keyed identity) and
+  enforces only mechanical rules: validator passes, scope fields never come
+  from source content, provenance is stamped by the pipeline, failed
+  conversions keep last-known-good and land in quarantine.
+- **The LLM worker stays toolless and the checks stay deterministic.** Source
   documents are untrusted input; never give the ingest worker tools, never
-  replace the gate's policy checks with model judgment, and never let model
+  replace the mechanical checks with model judgment, and never let model
   output set scopes, provenance, or unverified resource URIs.
 - **Operator ≠ knowledge.** This repo is the tool; real knowledge lives under
-  `OKF_KNOWLEDGE_ROOT` (bundles, staging, ledger). The in-repo `bundles/` are
-  demo fixtures. Never write ingest state or knowledge into the operator repo,
-  and never bake knowledge into the container image.
+  `OKF_KNOWLEDGE_ROOT` (bundles, ledger, quarantine). The in-repo `bundles/`
+  are demo fixtures and sync refuses to write without a knowledge root. Never
+  write sync state or knowledge into the operator repo, and never bake
+  knowledge into the container image.
 - **List-style MCP tools return summaries, never bodies.** Preserve this when
   adding tools — it is the context-size guarantee.
 - **Sensitivity = bundle separation.** Never move restricted concepts into the

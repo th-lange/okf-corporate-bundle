@@ -64,7 +64,9 @@ def test_drafts_and_provenance_via_unchanged_core_loop(
 def test_ledger_states_work_for_s3_objects(source: S3Source, tmp_path: Path) -> None:
     ledger = Ledger.load(tmp_path / "ledger.yaml")
     for doc in source.documents():
-        ledger.record(doc.source_uri, source.name, doc.relative_path, doc.revision)
+        ledger.record(
+            doc.source_uri, source.name, doc.relative_path, doc.revision, doc.content_sha256
+        )
 
     api = source.api
     assert isinstance(api, FakeS3Api)
@@ -72,7 +74,7 @@ def test_ledger_states_work_for_s3_objects(source: S3Source, tmp_path: Path) -> 
     api.objects["kb/notes.md"] = ('"etag-bbb-2"', body + "More.\n")  # edited
     del api.objects["kb/runbooks/failover.md"]  # removed upstream
 
-    current = {d.source_uri: d.revision for d in source.documents()}
+    current = {d.source_uri: (d.revision, d.content_sha256) for d in source.documents()}
     assert dict(ledger.status(current)) == {
         "s3://acme-kb/kb/notes.md": "modified",
         "s3://acme-kb/kb/runbooks/failover.md": "removed",

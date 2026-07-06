@@ -111,15 +111,11 @@ would actually plug its sectors in is documented as example configurations —
 compliance in git, design in Drive, data engineering in S3, each with its own
 transformer and scope — in
 [usage → federated sector sources](usage.md#example-federated-sector-sources);
-a runnable multi-sector fixture is deliberately not built. The remaining gaps
-between demo and vision are tracked as issues:
+a runnable multi-sector fixture is deliberately not built. Source-authoritative
+sync itself shipped with #37 — mirroring, hash-keyed identity, atomic commits,
+last-known-good, and the integrity report are implemented, not aspiration.
+The remaining gap between demo and vision:
 
-- **Source-authoritative sync** ([#37](https://github.com/th-lange/okf-corporate-bundle/issues/37))
-  — the current implementation still stages drafts for review, a transition
-  state; sync replaces it with direct mirroring: add / replace / remove per
-  ledger classification, hash-keyed identity (rename detection,
-  resurrection), one commit per run, last-known-good on failed conversions,
-  and a post-sync integrity report of dangling links routed to source owners.
 - **Closing the loop upstream** ([#38](https://github.com/th-lange/okf-corporate-bundle/issues/38))
   — agents never write to the brain; they propose changes to the owning
   sector's *source* (a PR in the sector's repo), the sector's own review

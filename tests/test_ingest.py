@@ -1,4 +1,6 @@
-"""Ingest tracer bullet (issue #15): git source → provenance-stamped drafts."""
+"""Ingest primitives (issue #15): git source, provenance, transformer seam.
+
+CLI-level behaviour lives in test_sync.py (source-authoritative sync)."""
 
 from datetime import datetime
 from pathlib import Path
@@ -69,24 +71,15 @@ def test_transformer_seam_is_pluggable(source_repo: Path, tmp_path: Path) -> Non
     assert "PROSE" in plain.path.read_text()
 
 
-def test_cli_end_to_end(source_repo: Path, tmp_path: Path, capsys) -> None:
-    staging = tmp_path / "drafts"
-    config = tmp_path / "ingest.yaml"
-    config.write_text(
-        f"staging_dir: {staging}\n"
-        f"ledger: {tmp_path / 'ledger.yaml'}\n"
-        "sources:\n"
-        f"  - name: handbook\n    type: git\n    url: {source_repo}\n"
-    )
-    assert ingest_main(["--config", str(config)]) == 0
-    assert (staging / "handbook" / "plain.md").exists()
-    assert "2 draft(s)" in capsys.readouterr().out
-
-
 def test_cli_rejects_unknown_source_type(tmp_path: Path, capsys) -> None:
     config = tmp_path / "ingest.yaml"
-    config.write_text(
-        f"ledger: {tmp_path / 'ledger.yaml'}\nsources:\n  - name: x\n    type: carrier-pigeon\n"
-    )
-    assert ingest_main(["--config", str(config)]) == 2
+    config.write_text("sources:\n  - name: x\n    type: carrier-pigeon\n")
+    assert ingest_main(["sync", "--config", str(config)]) == 2
     assert "unknown source type" in capsys.readouterr().err
+
+
+def test_cli_rejects_missing_target(source_repo: Path, tmp_path: Path, capsys) -> None:
+    config = tmp_path / "ingest.yaml"
+    config.write_text(f"sources:\n  - name: h\n    type: git\n    url: {source_repo}\n")
+    assert ingest_main(["sync", "--config", str(config)]) == 2
+    assert "needs a `target`" in capsys.readouterr().err

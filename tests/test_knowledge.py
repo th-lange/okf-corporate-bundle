@@ -84,16 +84,17 @@ async def test_explicit_bundle_dirs_beat_the_root(
     assert "MRR" in result[0].text
 
 
-def test_ingest_state_lands_in_the_root(
+def test_sync_state_lands_in_the_root(
     kroot: Path, source_repo: Path, capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # default config = <root>/ingest.yaml; relative paths resolve into the root
+    # default config = <root>/ingest.yaml; everything resolves into the root
     (kroot / "ingest.yaml").write_text(
-        "sources:\n" f"  - name: handbook\n    type: git\n    url: {source_repo}\n"
+        "sources:\n"
+        f"  - name: handbook\n    type: git\n    url: {source_repo}\n    target: external-kb\n"
     )
     monkeypatch.chdir(kroot / "bundles")  # anywhere that isn't the root or repo
-    assert ingest_main(["run"]) == 0
-    assert (kroot / "ingest" / "drafts" / "handbook" / "plain.md").exists()
+    assert ingest_main(["sync"]) == 0
+    assert (kroot / "bundles" / "external-kb" / "plain.md").exists()
     assert (kroot / "ingest" / "ledger.yaml").exists()
     # nothing written into the operator repo
     assert not (REPO_ROOT / "ingest").exists()

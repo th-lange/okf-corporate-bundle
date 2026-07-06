@@ -8,6 +8,7 @@ no core-loop changes.
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -24,9 +25,18 @@ class SourceDocument:
     """One document pulled from a source."""
 
     source_uri: str  # canonical per-document URI, e.g. "<repo-url>#<path>"
-    relative_path: str  # path within the source; decides draft placement
+    relative_path: str  # path within the source; decides placement
     revision: str  # stable revision id (commit hash, etag, ...)
     content: str
+
+    @property
+    def content_sha256(self) -> str:
+        """Content identity — consistency rolls on hashes, not revisions:
+        no-op revisions are no-ops here, and the same content at a new path
+        (rename) or reappearing after removal (resurrection) is recognisable
+        as the same concept.
+        """
+        return hashlib.sha256(self.content.encode("utf-8")).hexdigest()
 
 
 class Source(Protocol):

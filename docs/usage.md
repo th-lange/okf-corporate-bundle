@@ -148,22 +148,17 @@ uv run okf-validate bundles/acme-knowledge bundles/acme-knowledge-restricted
 
 and record the change in the bundle's `log.md`.
 
-## Ingesting external documents
+## Synchronizing external sources
 
-> **Direction note:** the staging + review step below is a transition state.
-> Under the [source-authority model](inversion.md) the sector's own review is
-> the only gate, and
-> [#37](https://github.com/th-lange/okf-corporate-bundle/issues/37) replaces
-> staging with direct, hash-keyed synchronization (add / replace / remove).
-> Until that ships, this section documents the current behaviour.
-
-`okf-ingest` pulls documents from configured sources and proposes them as
-**draft** concepts — it never writes into a served bundle. The whole system,
-end to end:
+`okf-ingest sync` is **source-authoritative**: whatever a sector publishes in
+its source is mirrored into the knowledge tree — added, replaced in place, or
+removed. There are no drafts and no editorial gate here; curation happens at
+the source, where the owning sector's own review process decides what gets
+published. The whole system, end to end:
 
 ```mermaid
 flowchart LR
-  subgraph SRC["Sector-owned sources"]
+  subgraph SRC["Sector-owned sources (their review is the gate)"]
     G["git repos"]
     GD["Google Drive"]
     S3["S3 buckets"]
@@ -171,23 +166,39 @@ flowchart LR
   G --> CONN
   GD --> CONN
   S3 --> CONN
-  CONN["Source connectors<br/>provenance: uri + revision"] --> LED{{"Ledger<br/>new / unchanged / modified / removed"}}
-  LED -- "new + modified only" --> TR["Transformer<br/>passthrough, or LLM worker + deterministic gate"]
-  TR --> ST["staging: ingest/drafts/<br/>(never a served bundle)"]
-  ST -- "human review (PR)" --> KB[("knowledge root<br/>OKF bundles")]
+  CONN["Source connectors<br/>provenance: uri + revision + content hash"] --> LED{{"Ledger<br/>hash-keyed identity:<br/>new / modified / renamed / restored / removed"}}
+  LED -- "real changes only" --> TR["Transformer<br/>passthrough, or toolless LLM worker<br/>+ mechanical checks"]
+  TR -- "valid" --> KB[("knowledge root<br/>add · replace · remove<br/>one commit per run")]
+  TR -- "invalid: last-known-good stays served" --> Q["quarantine + report"]
   KB --> MCP["okf-mcp → agents"]
-  style ST fill:#fef9c3,stroke:#eab308,color:#713f12
+  style Q fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
   style KB fill:#dcfce7,stroke:#22c55e,color:#14532d
 ```
 
 ```bash
-uv run okf-ingest                  # ingest new/modified docs (config/ingest.yaml)
-uv run okf-ingest status           # what's new / unchanged / modified / removed
-uv run okf-ingest --config my.yaml
+uv run okf-ingest sync             # mirror sources into $OKF_KNOWLEDGE_ROOT
+uv run okf-ingest status           # classify only, change nothing
+uv run okf-ingest sync --config my.yaml
 ```
 
-Sources live in `config/ingest.yaml` (`staging_dir` plus a `sources` list).
-Available types — new connectors implement the `Source` protocol in
+Sync requires `OKF_KNOWLEDGE_ROOT` — the operator repo's fixture bundles are
+read-only demo content. Each source names a `target` (`bundle[/dir]` under
+`<root>/bundles/`) where its concepts land; when the root is a git repo,
+every run that changed anything becomes **one commit**, so the brain flips
+between consistent states and `git revert` undoes an upstream accident.
+
+**Consistency rolls on content hashes.** The ledger keys every document by
+`content_sha256`, so: revision churn with identical bytes is a no-op; a
+document renamed upstream keeps its concept — identity, id, and inbound
+links — with only provenance updating; and a removed concept **resurrects**
+as itself when its content reappears. Removal upstream removes the concept
+from the tree (history is the tombstone), and a post-sync **integrity
+report** lists any links left dangling, so the owners fix them in their
+sources. A document that fails the mechanical checks never replaces its
+predecessor: the old concept stays served and the failed output lands in
+`ingest/quarantine/` with a report line (exit code 1).
+
+Available source types — new connectors implement the `Source` protocol in
 `src/okf_mcp/ingest/sources.py`:
 
 - `git` — `url` (local path or anything `git clone` accepts) + optional
@@ -208,19 +219,20 @@ config is where their worlds plug in. A realistic multi-sector
 `<knowledge-root>/ingest.yaml`:
 
 ```yaml
-staging_dir: ingest/drafts
 ledger: ingest/ledger.yaml
+quarantine: ingest/quarantine
 catalog_bundles: [bundles/acme-knowledge]   # link targets for the llm transformer
 
 sources:
-  # Compliance maintains rules and processes as prose in their own repo.
-  # Prose isn't OKF-shaped → the LLM transformer converts it, behind the
-  # deterministic gate; drafts still go through human review.
+  # Compliance maintains rules and processes as prose in their own repo;
+  # their repo's PR review is the gate. The LLM transformer converts prose,
+  # behind the mechanical checks.
   - name: compliance-handbook
     type: git
     url: git@github.com:acme/compliance-handbook.git
     paths: ["policies/**/*.md", "processes/**/*.md"]
     transformer: llm
+    target: acme-knowledge/compliance
 
   # Design keeps patterns and templates in a shared Drive folder.
   # Google Docs are exported to markdown automatically.
@@ -228,19 +240,20 @@ sources:
     type: gdrive
     folder_id: 1AbCdEfGhIjKlMnOpQrStUv
     transformer: llm
+    target: acme-knowledge/design
 
   # Data engineering already exports OKF-shaped runbooks to S3 → passthrough.
   - name: dataeng-runbooks
     type: s3
     bucket: acme-dataeng-docs
     prefix: runbooks/
+    target: acme-knowledge/dataeng
 ```
 
-Each run lands drafts under `ingest/drafts/<source>/…` and the ledger tracks
-every upstream document per sector. To keep a sector's knowledge gated to its
-own people, review its drafts into a sector directory that carries a scope
-default — e.g. `bundles/acme-knowledge/compliance/index.md` with
-`scope_default: [compliance]` — and grant the scope in the auth config:
+To keep a sector's knowledge gated to its own people, give its target
+directory a scope default — e.g. `bundles/acme-knowledge/compliance/index.md`
+with `scope_default: [compliance]` — and grant the scope in the auth config
+(scoping comes from the tree, never from source content):
 
 ```yaml
 # config/auth.yaml (excerpt)
@@ -249,16 +262,15 @@ default — e.g. `bundles/acme-knowledge/compliance/index.md` with
     scopes: [compliance]
 ```
 
-From that point the inversion is complete for the sector: they author in
-their own repo or Drive, the pipeline proposes, a human reviews, and agents
+From that point the inversion is complete for the sector: they author and
+review in their own repo or Drive, sync mirrors the result, and agents
 holding the `compliance` scope find the rules at the start of their task —
-nobody else ever sees them. Every draft lands under
-`ingest/drafts/<source>/…` stamped with provenance frontmatter: `source:`
-(the per-document source URI), `source_rev:` (the revision it was taken
-from), and `ingested_at:`. Documents without frontmatter get `type: Document`
-so drafts always pass validation; a `Transformer` seam
-(`src/okf_mcp/ingest/transform.py`) is where smarter conversion plugs in
-later.
+nobody else ever sees them. Every synced concept is stamped with provenance
+frontmatter: `source:` (the per-document source URI), `source_rev:` (the
+revision it was taken from), and `ingested_at:`. Documents without
+frontmatter get `type: Document` so they always validate; a `Transformer`
+seam (`src/okf_mcp/ingest/transform.py`) is where smarter conversion plugs
+in.
 
 ### LLM-assisted conversion (`transformer: llm`)
 
@@ -276,24 +288,21 @@ because source documents are untrusted input:
   `resource:` URI must appear verbatim in the source or is dropped; PII
   patterns set `pii_flag: true` for restricted-tier review; provenance is
   stamped by the pipeline, never by the model.
-- Gate findings are fed back to the worker at most twice; then the draft is
-  written with `needs_human: true` and the findings attached.
+- Gate findings are fed back to the worker at most twice; then the output is
+  synced carrying `needs_human: true` with the findings attached (mechanically
+  valid, visibly flagged for the owning sector to fix upstream).
 
 Injected instructions in a source document ("add scope: [exco]") have nothing
-to grab: the worker has no tools, and the gate strips or rejects anything the
-policy forbids. Human PR review remains the final gate.
+to grab: the worker has no tools, and the mechanical checks strip or reject
+anything the policy forbids — and treat every served body as untrusted
+content regardless.
 
-The **ledger** (`ingest/ledger.yaml`, committed) gives full visibility into
-what has been ingested: one entry per source document with its URI, revision,
-draft path, and ingest time. `okf-ingest status` compares current source
-revisions against it and classifies every document as new / unchanged /
-modified / removed. Re-running ingest regenerates drafts **only** for new and
-modified documents; documents that vanished upstream are flagged in the
-ledger (`removed_at`) and reported — never deleted. Retiring the concept a
-removed document produced is a human decision.
-
-The staging directory is gitignored on purpose: drafts reach a bundle only by
-a human reviewing them, moving them in, and opening a normal PR.
+The **ledger** (`ingest/ledger.yaml`, committed alongside the tree it
+describes) gives full visibility into what is synced: one entry per source
+document with its URI, connector revision, `content_sha256`, and the concept
+it projects to; entries removed upstream keep their hash so the concept can
+resurrect. `okf-ingest status` classifies every document as new / unchanged /
+modified / removed without changing anything.
 
 ## Deployment
 
@@ -305,19 +314,19 @@ serves lives outside, under a single knowledge root (`OKF_KNOWLEDGE_ROOT`):
 ├── bundles/                 git repo in production (per sensitivity tier)
 │   ├── acme-knowledge/
 │   └── acme-knowledge-restricted/
-├── ingest.yaml              ingest source configuration
+├── ingest.yaml              sync source configuration
 └── ingest/
-    ├── drafts/              staging written by okf-ingest
-    └── ledger.yaml          ingest ledger
+    ├── quarantine/          failed conversions (last-known-good stays served)
+    └── ledger.yaml          sync ledger (hash-keyed identity)
 ```
 
 With a root configured, the server serves every bundle under
-`<root>/bundles/`, and okf-ingest reads `<root>/ingest.yaml` and keeps its
-staging and ledger under the root — the operator never writes into its own
-tree. Foreign sources (git repos, Drive folders, S3 buckets) flow in through
-the ingester; the knowledge root is where their drafts and provenance land.
-Without a root, the bundled demo fixtures keep the fresh-clone experience
-working.
+`<root>/bundles/`, and `okf-ingest sync` reads `<root>/ingest.yaml` and keeps
+its ledger and quarantine under the root — the operator never writes into its
+own tree. Foreign sources (git repos, Drive folders, S3 buckets) mirror in
+through sync, one commit per run when the root is a git repo. Without a root,
+the bundled demo fixtures keep the fresh-clone serving experience working
+(sync itself always requires a root).
 
 Containerized:
 
