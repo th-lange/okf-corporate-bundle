@@ -1,13 +1,13 @@
-# okf-ingest sources (issue #15). Each source pulls documents that become
-# *draft* concepts under staging_dir — never directly into a served bundle;
-# a human reviews drafts and moves them into a bundle via a normal PR.
-#
-# Demo: ingest this repo's own docs/ so `uv run okf-ingest` works from a
-# fresh clone with no external dependencies.
-staging_dir: ingest/drafts
+# okf-ingest sources. Sync is source-authoritative: whatever these sources
+# publish is mirrored into the knowledge tree under $OKF_KNOWLEDGE_ROOT —
+# add / replace / remove, one commit per run, consistency keyed on content
+# hashes. The operator repo's fixture bundles are read-only demo content;
+# sync refuses to run without a knowledge root.
 ledger: ingest/ledger.yaml
+quarantine: ingest/quarantine
 sources:
   - name: self-docs
     type: git
     url: .
     paths: ["docs/*.md"]
+    target: acme-knowledge/imported

@@ -1,122 +1,78 @@
-"""Ingest ledger (issue #16): new / unchanged / modified / removed tracking."""
+"""Sync ledger (issues #16/#37): hash-keyed classification and identity."""
 
 from pathlib import Path
 
-import pytest
-import yaml
-from conftest import PLAIN, git
-
-from okf_mcp.ingest.cli import main as ingest_main
 from okf_mcp.ingest.ledger import Ledger
 
 
-@pytest.fixture()
-def workspace(source_repo: Path, tmp_path: Path) -> dict:
-    staging = tmp_path / "drafts"
-    ledger = tmp_path / "ledger.yaml"
-    config = tmp_path / "ingest.yaml"
-    config.write_text(
-        f"staging_dir: {staging}\n"
-        f"ledger: {ledger}\n"
-        "sources:\n"
-        f"  - name: handbook\n    type: git\n    url: {source_repo}\n"
-    )
-    return {
-        "repo": source_repo,
-        "staging": staging,
-        "ledger": ledger,
-        "config": ["--config", str(config)],
-        "note_uri": f"{source_repo}#notes/mrr-tips.md",
-        "plain_uri": f"{source_repo}#plain.md",
+def make(tmp_path: Path) -> Ledger:
+    ledger = Ledger.load(tmp_path / "ledger.yaml")
+    ledger.record("uri://a", "src", "bundles/kb/a.md", "rev1", "sha-a")
+    return ledger
+
+
+def test_classification_rolls_on_hashes(tmp_path: Path) -> None:
+    ledger = make(tmp_path)
+    assert ledger.classify("uri://a", "rev1", "sha-a") == "unchanged"
+    # revision churn with identical content is a no-op
+    assert ledger.classify("uri://a", "rev2", "sha-a") == "unchanged"
+    assert ledger.classify("uri://a", "rev2", "sha-b") == "modified"
+    assert ledger.classify("uri://b", "rev1", "sha-a") == "new"
+
+
+def test_match_and_adopt_preserve_the_concept(tmp_path: Path) -> None:
+    ledger = make(tmp_path)
+    # rename: uri://a vanished this run, uri://b appeared with the same hash
+    assert ledger.match_by_sha("sha-a", current_uris={"uri://b"}) == "uri://a"
+    assert ledger.match_by_sha("sha-x", current_uris={"uri://b"}) is None
+
+    entry, was_removed = ledger.adopt("uri://a", "uri://b", "rev2")
+    assert entry["concept"] == "bundles/kb/a.md"  # identity carried over
+    assert was_removed is False
+    assert ledger.entry("uri://a") is None
+    assert ledger.entry("uri://b")["revision"] == "rev2"
+
+
+def test_adopt_after_removal_reports_restoration(tmp_path: Path) -> None:
+    ledger = make(tmp_path)
+    assert ledger.sweep_removed(set()) == ["uri://a"]
+    assert "removed_at" in ledger.entry("uri://a")
+
+    entry, was_removed = ledger.adopt("uri://a", "uri://c", "rev3")
+    assert was_removed is True
+    assert "removed_at" not in entry
+
+
+def test_sweep_flags_each_document_once(tmp_path: Path) -> None:
+    ledger = make(tmp_path)
+    ledger.record("uri://b", "src", "bundles/kb/b.md", "rev1", "sha-b")
+    assert ledger.sweep_removed({"uri://a"}) == ["uri://b"]
+    assert ledger.sweep_removed({"uri://a"}) == []  # already flagged
+
+
+def test_mark_seen_refreshes_revision_and_clears_flag(tmp_path: Path) -> None:
+    ledger = make(tmp_path)
+    ledger.sweep_removed(set())
+    ledger.mark_seen("uri://a", revision="rev9")
+    entry = ledger.entry("uri://a")
+    assert entry["revision"] == "rev9"
+    assert "removed_at" not in entry
+
+
+def test_status_covers_all_states_without_mutating(tmp_path: Path) -> None:
+    ledger = make(tmp_path)
+    current = {
+        "uri://a": ("rev5", "sha-a"),  # unchanged (hash wins over revision)
+        "uri://new": ("r", "s"),
     }
-
-
-def entries(ledger_path: Path) -> dict:
-    return yaml.safe_load(ledger_path.read_text())["documents"]
-
-
-def test_first_run_records_every_document(workspace: dict, capsys) -> None:
-    assert ingest_main(["run", *workspace["config"]]) == 0
-    assert "2 new, 0 modified, 0 unchanged, 0 removed" in capsys.readouterr().out
-
-    docs = entries(workspace["ledger"])
-    assert set(docs) == {workspace["note_uri"], workspace["plain_uri"]}
-    plain = docs[workspace["plain_uri"]]
-    assert plain["source"] == "handbook"
-    assert plain["draft"] == "handbook/plain.md"
-    assert len(plain["revision"]) == 40
-    assert "ingested_at" in plain
-
-
-def test_status_classifies_all_four_states(workspace: dict, capsys) -> None:
-    ingest_main(["run", *workspace["config"]])
-    repo = workspace["repo"]
-    (repo / "plain.md").write_text(PLAIN + "\nEdited.\n")
-    (repo / "fresh.md").write_text("# Fresh\n\nBrand new doc.\n")
-    git(repo, "rm", "--quiet", "notes/mrr-tips.md")
-    git(repo, "add", ".")
-    git(repo, "commit", "--quiet", "-m", "edit, add, remove")
-    capsys.readouterr()
-
-    assert ingest_main(["status", *workspace["config"]]) == 0
-    out = capsys.readouterr().out
-    assert f"MODIFIED   {workspace['plain_uri']}" in out
-    assert f"NEW        {repo}#fresh.md" in out
-    assert f"REMOVED    {workspace['note_uri']}" in out
-    assert "1 new, 1 modified, 0 unchanged, 1 removed" in out
-    # status never mutates the ledger
-    assert "removed_at" not in entries(workspace["ledger"])[workspace["note_uri"]]
-
-
-def test_reingest_regenerates_only_modified(workspace: dict, capsys) -> None:
-    ingest_main(["run", *workspace["config"]])
-    note_draft = workspace["staging"] / "handbook" / "notes" / "mrr-tips.md"
-    plain_draft = workspace["staging"] / "handbook" / "plain.md"
-    note_before = note_draft.read_bytes()
-    plain_before = plain_draft.read_bytes()
-    old_revision = entries(workspace["ledger"])[workspace["plain_uri"]]["revision"]
-
-    repo = workspace["repo"]
-    (repo / "plain.md").write_text(PLAIN + "\nEdited.\n")
-    git(repo, "commit", "--quiet", "-am", "edit plain")
-    capsys.readouterr()
-
-    assert ingest_main(["run", *workspace["config"]]) == 0
-    assert "0 new, 1 modified, 1 unchanged, 0 removed" in capsys.readouterr().out
-    assert note_draft.read_bytes() == note_before  # untouched draft not rewritten
-    assert plain_draft.read_bytes() != plain_before
-    assert entries(workspace["ledger"])[workspace["plain_uri"]]["revision"] != old_revision
-
-
-def test_removed_is_flagged_never_deleted(workspace: dict, capsys) -> None:
-    ingest_main(["run", *workspace["config"]])
-    repo = workspace["repo"]
-    git(repo, "rm", "--quiet", "plain.md")
-    git(repo, "commit", "--quiet", "-m", "drop plain")
-    capsys.readouterr()
-
-    assert ingest_main(["run", *workspace["config"]]) == 0
-    captured = capsys.readouterr()
-    assert "REMOVED upstream" in captured.err
-    assert workspace["plain_uri"] in captured.err
-
-    entry = entries(workspace["ledger"])[workspace["plain_uri"]]
-    assert "removed_at" in entry  # flagged in the ledger …
-    assert (workspace["staging"] / "handbook" / "plain.md").exists()  # … draft kept
-
-    # restoring the document upstream clears the flag on the next run
-    git(repo, "revert", "--quiet", "--no-edit", "HEAD")
-    ingest_main(["run", *workspace["config"]])
-    assert "removed_at" not in entries(workspace["ledger"])[workspace["plain_uri"]]
+    assert dict(ledger.status(current)) == {"uri://a": "unchanged", "uri://new": "new"}
+    assert dict(ledger.status({})) == {"uri://a": "removed"}
+    assert "removed_at" not in ledger.entry("uri://a")  # status never mutates
 
 
 def test_ledger_survives_reload(tmp_path: Path) -> None:
-    path = tmp_path / "ledger.yaml"
-    ledger = Ledger.load(path)
-    ledger.record("uri://x", "src", "src/x.md", "rev1")
+    ledger = make(tmp_path)
     ledger.save()
-
-    reloaded = Ledger.load(path)
-    assert reloaded.classify("uri://x", "rev1") == "unchanged"
-    assert reloaded.classify("uri://x", "rev2") == "modified"
-    assert reloaded.classify("uri://y", "rev1") == "new"
+    reloaded = Ledger.load(tmp_path / "ledger.yaml")
+    assert reloaded.classify("uri://a", "rev1", "sha-a") == "unchanged"
+    assert reloaded.entry("uri://a")["concept"] == "bundles/kb/a.md"

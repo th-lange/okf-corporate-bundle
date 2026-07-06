@@ -119,12 +119,15 @@ Development is issue-driven; every issue carries acceptance criteria. Shipped:
   result limits, the LLM transformer (toolless worker + deterministic gate),
   operator/knowledge separation with a container story, and scope-gated
   cross-bundle references.
+- **Source-authoritative sync** (#37): `okf-ingest sync` mirrors sector
+  sources into the knowledge tree — add / replace / remove, hash-keyed
+  identity (rename preservation, resurrection), one commit per run,
+  last-known-good on failed conversions, post-sync integrity report.
 
-Open — the gaps between demo and the [inversion vision](docs/inversion.md):
-source-authoritative sync replacing the draft stage, with hash-keyed identity
-and invalidation (#37), and the agent write-back loop proposing changes
-upstream into sector sources (#38); how sectors plug in their own sources is
-documented as [example configurations](docs/usage.md#example-federated-sector-sources)
+Open — the last gap to the [inversion vision](docs/inversion.md): the agent
+write-back loop proposing changes upstream into sector sources (#38); how
+sectors plug in their own sources is documented as
+[example configurations](docs/usage.md#example-federated-sector-sources)
 rather than a runnable demo. See the
 [issue tracker](https://github.com/th-lange/okf-corporate-bundle/issues).
 

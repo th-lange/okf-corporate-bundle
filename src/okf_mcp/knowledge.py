@@ -7,10 +7,10 @@ sensitivity tier. Expected layout:
 
     <knowledge-root>/
     ├── bundles/            one directory per bundle (must contain index.md)
-    ├── ingest.yaml         ingest source configuration (optional)
+    ├── ingest.yaml         sync source configuration (optional)
     └── ingest/
-        ├── drafts/         staging area written by okf-ingest
-        └── ledger.yaml     ingest ledger
+        ├── quarantine/     failed conversions (last-known-good stays served)
+        └── ledger.yaml     sync ledger (hash-keyed identity)
 
 The root comes from the OKF_KNOWLEDGE_ROOT environment variable. Without it,
 the operator falls back to the demo fixtures bundled in this repo, so a
