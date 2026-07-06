@@ -150,6 +150,13 @@ and record the change in the bundle's `log.md`.
 
 ## Ingesting external documents
 
+> **Direction note:** the staging + review step below is a transition state.
+> Under the [source-authority model](inversion.md) the sector's own review is
+> the only gate, and
+> [#37](https://github.com/th-lange/okf-corporate-bundle/issues/37) replaces
+> staging with direct, hash-keyed synchronization (add / replace / remove).
+> Until that ships, this section documents the current behaviour.
+
 `okf-ingest` pulls documents from configured sources and proposes them as
 **draft** concepts — it never writes into a served bundle. The whole system,
 end to end:

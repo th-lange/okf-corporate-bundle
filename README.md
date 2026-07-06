@@ -17,10 +17,11 @@ bounce the question back to a human. Most agent inefficiency isn't reasoning
 failure — it's *context starvation*.
 
 This repo demonstrates the inversion: each sector **maintains** its knowledge
-(rules, processes, patterns, decisions) as an owned artifact; that knowledge is
-ingested — with provenance, through a human review gate — into a curated,
-scoped, validated **corporate brain**; and agents query the brain over MCP at
-the **start** of every task. Knowledge becomes the pipeline's input, not its
+(rules, processes, patterns, decisions) as an owned artifact, reviewed in the
+sector's own process; that knowledge is synchronized — with provenance and
+mechanical validation, the sources staying authoritative — into a scoped,
+validated **corporate brain**; and agents query the brain over MCP at the
+**start** of every task. Knowledge becomes the pipeline's input, not its
 exhaust. The full argument, with the old-vs-new pipeline diagrams and the
 vision-to-mechanism mapping, is in [docs/inversion.md](docs/inversion.md).
 
@@ -120,8 +121,9 @@ Development is issue-driven; every issue carries acceptance criteria. Shipped:
   cross-bundle references.
 
 Open — the gaps between demo and the [inversion vision](docs/inversion.md):
-`okf-ingest propose` promoting reviewed drafts into the knowledge repo (#37)
-and the agent write-back loop (#38); how sectors plug in their own sources is
+source-authoritative sync replacing the draft stage, with hash-keyed identity
+and invalidation (#37), and the agent write-back loop proposing changes
+upstream into sector sources (#38); how sectors plug in their own sources is
 documented as [example configurations](docs/usage.md#example-federated-sector-sources)
 rather than a runnable demo. See the
 [issue tracker](https://github.com/th-lange/okf-corporate-bundle/issues).
