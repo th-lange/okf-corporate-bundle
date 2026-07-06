@@ -192,7 +192,60 @@ Available types — new connectors implement the `Source` protocol in
   `drive.readonly` scope) — never from config files.
 - `s3` — `bucket` + optional `prefix`; `*.md` objects only. Revision = the
   object's ETag. Requires the `s3` extra (`uv sync --extra s3`); credentials
-  come from the standard AWS chain (env vars, profile, instance role). Every draft lands under
+  come from the standard AWS chain (env vars, profile, instance role).
+
+### Example: federated sector sources
+
+Each sector keeps maintaining knowledge where it already works; the ingest
+config is where their worlds plug in. A realistic multi-sector
+`<knowledge-root>/ingest.yaml`:
+
+```yaml
+staging_dir: ingest/drafts
+ledger: ingest/ledger.yaml
+catalog_bundles: [bundles/acme-knowledge]   # link targets for the llm transformer
+
+sources:
+  # Compliance maintains rules and processes as prose in their own repo.
+  # Prose isn't OKF-shaped → the LLM transformer converts it, behind the
+  # deterministic gate; drafts still go through human review.
+  - name: compliance-handbook
+    type: git
+    url: git@github.com:acme/compliance-handbook.git
+    paths: ["policies/**/*.md", "processes/**/*.md"]
+    transformer: llm
+
+  # Design keeps patterns and templates in a shared Drive folder.
+  # Google Docs are exported to markdown automatically.
+  - name: design-guidelines
+    type: gdrive
+    folder_id: 1AbCdEfGhIjKlMnOpQrStUv
+    transformer: llm
+
+  # Data engineering already exports OKF-shaped runbooks to S3 → passthrough.
+  - name: dataeng-runbooks
+    type: s3
+    bucket: acme-dataeng-docs
+    prefix: runbooks/
+```
+
+Each run lands drafts under `ingest/drafts/<source>/…` and the ledger tracks
+every upstream document per sector. To keep a sector's knowledge gated to its
+own people, review its drafts into a sector directory that carries a scope
+default — e.g. `bundles/acme-knowledge/compliance/index.md` with
+`scope_default: [compliance]` — and grant the scope in the auth config:
+
+```yaml
+# config/auth.yaml (excerpt)
+  - subject: compliance-lead@acme.test
+    token: token-compliance
+    scopes: [compliance]
+```
+
+From that point the inversion is complete for the sector: they author in
+their own repo or Drive, the pipeline proposes, a human reviews, and agents
+holding the `compliance` scope find the rules at the start of their task —
+nobody else ever sees them. Every draft lands under
 `ingest/drafts/<source>/…` stamped with provenance frontmatter: `source:`
 (the per-document source URI), `source_rev:` (the revision it was taken
 from), and `ingested_at:`. Documents without frontmatter get `type: Document`

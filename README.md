@@ -120,9 +120,10 @@ Development is issue-driven; every issue carries acceptance criteria. Shipped:
   cross-bundle references.
 
 Open — the gaps between demo and the [inversion vision](docs/inversion.md):
-a federated sector-owned source demo (#36), `okf-ingest propose` promoting
-reviewed drafts into the knowledge repo (#37), and the agent write-back loop
-(#38). See the
+`okf-ingest propose` promoting reviewed drafts into the knowledge repo (#37)
+and the agent write-back loop (#38); how sectors plug in their own sources is
+documented as [example configurations](docs/usage.md#example-federated-sector-sources)
+rather than a runnable demo. See the
 [issue tracker](https://github.com/th-lange/okf-corporate-bundle/issues).
 
 ## Development

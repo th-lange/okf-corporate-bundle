@@ -93,12 +93,14 @@ structural, not aspirational:
 
 ## What's demonstrated vs. what's open
 
-This repo is a working proof of the mechanism, at demo scale. Three gaps
+This repo is a working proof of the mechanism, at demo scale. How a company
+would actually plug its sectors in is documented as example configurations —
+compliance in git, design in Drive, data engineering in S3, each with its own
+transformer and scope — in
+[usage → federated sector sources](usage.md#example-federated-sector-sources);
+a runnable multi-sector fixture is deliberately not built. The remaining gaps
 between demo and vision are tracked as issues:
 
-- **Federated content story** ([#36](https://github.com/th-lange/okf-corporate-bundle/issues/36))
-  — the connectors prove a sector *could* own its source; the demo doesn't
-  yet show a department's own repo flowing in end-to-end.
 - **Draft promotion** ([#37](https://github.com/th-lange/okf-corporate-bundle/issues/37))
   — reviewed drafts still travel from staging to bundle by hand;
   `okf-ingest propose` should prepare the branch/PR in the knowledge repo.
