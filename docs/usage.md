@@ -297,6 +297,24 @@ to grab: the worker has no tools, and the mechanical checks strip or reject
 anything the policy forbids — and treat every served body as untrusted
 content regardless.
 
+### Proposing changes upstream (`propose_upstream`)
+
+Agents never write to the brain — nothing does, except sync. When an agent
+learns something worth keeping (a runbook correction, a missing alias), the
+`propose_upstream` MCP tool sends the change to the **owning sector's
+source**, resolved from the concept's `source:` provenance: for git sources
+it becomes a branch in the sector's repository (authored as the session's
+principal, rationale as the commit message, pushed when a remote exists) for
+the sector's own review to accept; for Drive/S3 sources — which have no
+branch primitive — a suggestion artifact is recorded under
+`<root>/ingest/proposals/`. Once the sector accepts, the next sync brings
+the knowledge back into the brain: the loop closes without the brain ever
+gaining a second author.
+
+Mechanical rules apply as everywhere: scope fields are rejected outright,
+pipeline-owned fields are stripped, a *changed* `resource:` URI must appear
+verbatim in the rationale, and every call — allow or deny — is audit-logged.
+
 The **ledger** (`ingest/ledger.yaml`, committed alongside the tree it
 describes) gives full visibility into what is synced: one entry per source
 document with its URI, connector revision, `content_sha256`, and the concept
