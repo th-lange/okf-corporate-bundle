@@ -201,8 +201,14 @@ predecessor: the old concept stays served and the failed output lands in
 Available source types — new connectors implement the `Source` protocol in
 `src/okf_mcp/ingest/sources.py`:
 
-- `git` — `url` (local path or anything `git clone` accepts) + optional
-  `paths` glob patterns. Revision = last commit touching the file.
+- `git` — `url` (a path to an existing local clone, used in place unmodified;
+  or anything `git clone` accepts — the remote case) + optional `paths` glob
+  patterns (default `**/*.md`). Revision = last commit touching the file. A
+  fresh remote checkout is a **partial + sparse clone scoped to `paths`**:
+  `--filter=blob:none --sparse` means only the configured folders' blobs are
+  ever fetched or materialized — pointing a source at one folder of a large
+  monorepo does not download the rest of it. Commit history is kept in full
+  (never shallowed), so revision lookup is unaffected.
 - `gdrive` — `folder_id` of a Drive folder. Native Google Docs are exported
   as markdown, `*.md` files downloaded as-is, everything else skipped.
   Revision = `headRevisionId` (falling back to `modifiedTime`). Credentials
@@ -249,6 +255,12 @@ sources:
     prefix: runbooks/
     target: acme-knowledge/dataeng
 ```
+
+Note `compliance-handbook`'s `paths: ["policies/**/*.md", "processes/**/*.md"]` — if
+`compliance-handbook.git` were a large monorepo with many other folders, this
+still only fetches and checks out those two, via the sparse+partial clone
+described above. Scoping a sector's source to its own corner of a shared repo
+costs nothing extra.
 
 To keep a sector's knowledge gated to its own people, give its target
 directory a scope default — e.g. `bundles/acme-knowledge/compliance/index.md`

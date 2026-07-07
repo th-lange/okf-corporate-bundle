@@ -52,8 +52,16 @@ class GitSource:
     """Pull markdown documents from a git repository.
 
     `url` is anything `git clone` accepts; a path to an existing local clone
-    is used in place. Each document's revision is the hash of the last commit
-    that touched it, so unrelated upstream commits don't mark it as changed.
+    is used in place, unmodified. Each document's revision is the hash of
+    the last commit that touched it, so unrelated upstream commits don't
+    mark it as changed.
+
+    A fresh checkout is a **partial + sparse** clone scoped to `paths`:
+    `--filter=blob:none` defers blob downloads for everything outside the
+    checked-out cone, and `--sparse` (non-cone mode, so `paths`' glob
+    patterns apply directly) limits the working tree to it. Commit history
+    is never shallowed — the per-file revision lookup needs full history,
+    not blob content, so it is unaffected.
     """
 
     name: str
@@ -86,19 +94,26 @@ class GitSource:
             return local
         clone = self.cache_dir / self.name
         if (clone / ".git").exists():
+            # Partial-clone filter and sparse-checkout patterns persist in
+            # the clone's config, so a plain fast-forward pull respects both.
             _git(clone, "pull", "--ff-only", "--quiet")
         else:
             clone.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                subprocess.run(
-                    ["git", "clone", "--quiet", self.url, str(clone)],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-            except subprocess.CalledProcessError as exc:
-                raise SourceError(f"cannot clone {self.url!r}: {exc.stderr.strip()}") from exc
+            self._sparse_clone(clone)
         return clone
+
+    def _sparse_clone(self, clone: Path) -> None:
+        try:
+            _git(
+                Path.cwd(),
+                "clone", "--quiet", "--filter=blob:none", "--sparse",
+                "--no-checkout", self.url, str(clone),
+            )
+        except SourceError as exc:
+            raise SourceError(f"cannot clone {self.url!r}: {exc}") from exc
+        _git(clone, "sparse-checkout", "init", "--no-cone")
+        _git(clone, "sparse-checkout", "set", *self.paths)
+        _git(clone, "checkout", "--quiet")
 
 
 def _git(cwd: Path, *args: str) -> str:
