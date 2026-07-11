@@ -20,7 +20,7 @@ OKF_AUDIT_LOG, or to the `okf_mcp.audit` logger when unset.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -35,7 +35,7 @@ from okf_mcp.embeddings import (
     sentence_transformers_available,
 )
 from okf_mcp.index import OkfIndex, UnknownConceptError, full, summary
-from okf_mcp.knowledge import REPO_ROOT, discover_bundles, knowledge_root
+from okf_mcp.knowledge import REPO_ROOT, discover_bundles, knowledge_root, pointer_path
 from okf_mcp.writeback import ProposalError
 from okf_mcp.writeback import propose_upstream as propose_upstream_change
 
@@ -55,6 +55,73 @@ def _default_bundle_dirs() -> Sequence[Path]:
     if root is not None:
         return discover_bundles(root)
     return _DEFAULT_BUNDLES
+
+
+def _pointer_path_for_defaults() -> Path | None:
+    """The generation pointer file backing `_default_bundle_dirs`'s
+    auto-discovered bundles, or None when there's nothing to watch — an
+    explicit `OKF_BUNDLE_DIRS`/`OKF_BUNDLE_DIR` override, no knowledge
+    root, or the demo fixtures all mean there is no generation to reload."""
+    if os.environ.get("OKF_BUNDLE_DIRS") or os.environ.get("OKF_BUNDLE_DIR"):
+        return None
+    root = knowledge_root()
+    return pointer_path(root) if root is not None else None
+
+
+def _hot_reload_enabled() -> bool:
+    """Opt-in per-call reload check (`OKF_HOT_RELOAD=1`).
+
+    Under stdio the process *is* the session (issue #47): `build_server()`
+    already resolves the generation pointer once at startup and pins that
+    generation for the process's lifetime, which is all a short-lived CLI
+    session needs — a concurrent publish never changes an in-flight
+    process's view. Long-lived transports (a future HTTP server, or a
+    stdio host kept warm across many logical sessions) opt into a stat()
+    per tool call so they pick up a new generation without restarting.
+    """
+    raw = os.environ.get("OKF_HOT_RELOAD", "").strip().lower()
+    return raw not in ("", "0", "false", "no")
+
+
+class ServedIndex:
+    """The generation-pinned `OkfIndex` a server process serves, with a
+    hot-reload seam for long-lived processes.
+
+    Built once at construction (pinned to whatever `generations/CURRENT`
+    resolves to at that moment, or the plain layout if the root has no
+    generations). `maybe_reload()` re-stats the pointer file and, only if
+    it moved, rebuilds a fresh `OkfIndex` and swaps it in — a plain
+    attribute reassignment, which is atomic enough for this single
+    -threaded stdio server: in-flight tool calls that already read
+    `self.index` keep the object they read; the next call sees the swap.
+    """
+
+    def __init__(self, build: Callable[[], OkfIndex], pointer: Path | None) -> None:
+        self._build = build
+        self._pointer = pointer
+        self._token = self._read_token()
+        self.index = build()
+
+    def _read_token(self) -> tuple[int, int] | None:
+        if self._pointer is None:
+            return None
+        try:
+            stat = self._pointer.stat()
+        except FileNotFoundError:
+            return None
+        return (stat.st_mtime_ns, stat.st_size)
+
+    def maybe_reload(self) -> bool:
+        """Rebuild and swap in the CURRENT generation's index if the
+        pointer moved since the last build. Returns whether it swapped."""
+        if self._pointer is None:
+            return False
+        token = self._read_token()
+        if token == self._token:
+            return False
+        self.index = self._build()
+        self._token = token
+        return True
 
 
 def _resolve_semantic_search(
@@ -111,10 +178,12 @@ def build_server(
     audit_log: AuditLog | None = None,
     encoder: Encoder | None = None,
 ) -> FastMCP:
+    auto_bundles = bundle_dirs is None
     if bundle_dirs is None:
         bundle_dirs = _default_bundle_dirs()
     if isinstance(bundle_dirs, Path):
         bundle_dirs = [bundle_dirs]
+    fixed_bundle_dirs = tuple(bundle_dirs)
     principal = _resolve_principal(scopes, authenticator, token)
     if authorizer is None:
         config = Path(os.environ.get("OKF_RESOURCE_CONFIG", _DEFAULT_RESOURCE_CONFIG))
@@ -122,7 +191,25 @@ def build_server(
     if audit_log is None:
         audit_path = os.environ.get("OKF_AUDIT_LOG")
         audit_log = AuditLog(Path(audit_path) if audit_path else None)
-    index = OkfIndex(*bundle_dirs).visible_to(principal.scopes)
+
+    def _build_index() -> OkfIndex:
+        # Re-discover on every rebuild only when bundles were auto-resolved
+        # from the knowledge root; an explicit bundle_dirs/OKF_BUNDLE_DIRS
+        # override is fixed for the process's lifetime either way.
+        dirs = _default_bundle_dirs() if auto_bundles else fixed_bundle_dirs
+        return OkfIndex(*dirs).visible_to(principal.scopes)
+
+    served = ServedIndex(_build_index, _pointer_path_for_defaults() if auto_bundles else None)
+    hot_reload = _hot_reload_enabled()
+
+    def _current_index() -> OkfIndex:
+        # Startup pinning alone satisfies stdio (process == session); this
+        # per-call stat() only runs when OKF_HOT_RELOAD opts a long-lived
+        # transport into picking up a new generation without restarting.
+        if hot_reload:
+            served.maybe_reload()
+        return served.index
+
     semantic_encoder, semantic_store = _resolve_semantic_search(encoder)
     mcp = FastMCP(
         "okf-knowledge",
@@ -145,9 +232,9 @@ def build_server(
             concept_id: Bundle-relative id, e.g. "/metrics/monthly-recurring-revenue".
         """
         try:
-            return full(index.get_concept(concept_id))
+            return full(_current_index().get_concept(concept_id))
         except UnknownConceptError:
-            known_types = ", ".join(index.types())
+            known_types = ", ".join(_current_index().types())
             raise ValueError(
                 f"Unknown concept id {concept_id!r}. Ids are bundle-relative paths "
                 f"like /glossary/mrr. Available types: {known_types}."
@@ -183,10 +270,10 @@ def build_server(
             tags: Optional tag filter; matches concepts carrying any of these tags.
             limit: Maximum results to return (default 20).
         """
-        hits = index.search(query, concept_type, tags, limit)
+        hits = _current_index().search(query, concept_type, tags, limit)
         if semantic_encoder is not None and semantic_store is not None and len(hits) < limit:
             seen = {doc.id for doc in hits}
-            visible_ids = index.ids()
+            visible_ids = _current_index().ids()
             query_vector = semantic_encoder.encode([query])[0]
             candidates = semantic_store.top_k(
                 semantic_encoder.model_id, visible_ids, query_vector, len(visible_ids)
@@ -197,7 +284,7 @@ def build_server(
                 if concept_id in seen:
                     continue
                 try:
-                    doc = index.get_concept(concept_id)
+                    doc = _current_index().get_concept(concept_id)
                 except UnknownConceptError:
                     continue
                 if concept_type is not None and doc.type != concept_type:
@@ -215,7 +302,7 @@ def build_server(
         Args:
             concept_type: OKF type string, e.g. "Metric", "Runbook", "BigQuery Table".
         """
-        return [summary(d) for d in index.list_by_type(concept_type)]
+        return [summary(d) for d in _current_index().list_by_type(concept_type)]
 
     @mcp.tool()
     def follow_links(concept_id: str, depth: int = 1) -> list[dict]:
@@ -231,7 +318,7 @@ def build_server(
             depth: Maximum link-hops to follow (default 1).
         """
         try:
-            reached = index.follow_links(concept_id, depth)
+            reached = _current_index().follow_links(concept_id, depth)
         except UnknownConceptError:
             raise ValueError(
                 f"Unknown concept id {concept_id!r}. Ids are bundle-relative "
@@ -265,7 +352,7 @@ def build_server(
             concept_id: Bundle-relative id, e.g. "/metrics/monthly-recurring-revenue".
         """
         try:
-            doc = index.get_concept(concept_id)
+            doc = _current_index().get_concept(concept_id)
         except UnknownConceptError:
             _audit(concept_id, "unknown-concept")
             raise ValueError(f"Unknown concept id {concept_id!r}.") from None
@@ -298,7 +385,7 @@ def build_server(
             rationale: Why this change is right — becomes the commit message.
         """
         try:
-            doc = index.get_concept(concept_id)
+            doc = _current_index().get_concept(concept_id)
         except UnknownConceptError:
             _audit(concept_id, "unknown-concept", tool="propose_upstream")
             raise ValueError(f"Unknown concept id {concept_id!r}.") from None
@@ -312,6 +399,7 @@ def build_server(
         _audit(concept_id, "allow", result.ref, tool="propose_upstream")
         return {"kind": result.kind, "ref": result.ref, "pushed": result.pushed}
 
+    mcp.maybe_reload = served.maybe_reload
     return mcp
 
 

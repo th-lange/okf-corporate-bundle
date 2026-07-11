@@ -69,6 +69,7 @@ import yaml
 
 from okf_mcp.embeddings import embeddings_config_from_file, make_post_sync_hook
 from okf_mcp.index import OkfIndex
+from okf_mcp.ingest import generations
 from okf_mcp.ingest.drive import DriveSource
 from okf_mcp.ingest.ledger import Ledger
 from okf_mcp.ingest.llm import ClaudeClient, LlmError, LlmTransformer
@@ -357,11 +358,21 @@ def _apply(
     return None
 
 
-def _commit(root: Path, ledger_path: Path, counts: Counter) -> str | None:
-    """One commit per sync run in the knowledge repo; none if it isn't one."""
+def _commit(
+    root: Path, ledger_path: Path, counts: Counter, content_root: Path | None = None
+) -> str | None:
+    """One commit per sync run in the knowledge repo; none if it isn't one.
+
+    `content_root` is the tree actually written this run — the staged
+    generation directory when generations are enabled, else `root` itself.
+    `root` is always the git worktree; paths staged for commit are always
+    relative to it. Git stays the audit trail, not the publish mechanism —
+    the generation pointer flip (`okf_mcp.ingest.generations`) works
+    without it."""
     if not (root / ".git").exists():
         return None
-    paths = ["bundles"]
+    content_root = content_root or root
+    paths = [str((content_root / "bundles").relative_to(root))]
     if ledger_path.is_relative_to(root):
         paths.append(str(ledger_path.relative_to(root)))
     subprocess.run(["git", "-C", str(root), "add", "-A", *paths], capture_output=True, check=True)
@@ -417,6 +428,7 @@ def _sync(
     *,
     since: timedelta | None = None,
     allow_empty: bool = False,
+    true_root: Path | None = None,
 ) -> int:
     for _, _, target in specs:
         bundle = target.split("/", 1)[0]
@@ -488,9 +500,9 @@ def _sync(
         outcomes.append(SourceOutcome(name, "OK", source_counts))
 
     ledger.save()
-    _post_sync(root, ledger, specs)
+    _post_sync(true_root or root, ledger, specs)
 
-    commit = _commit(root, ledger_path, counts)
+    commit = _commit(true_root or root, ledger_path, counts, content_root=root)
 
     for line in _integrity(root):
         print(f"  INTEGRITY {line}", file=sys.stderr)
@@ -525,6 +537,52 @@ def _status(ledger: Ledger, sources: list[Source]) -> int:
     return 0
 
 
+def _sync_generation(
+    root: Path,
+    ledger_path: Path,
+    specs: list[SourceSpec],
+    transformers: dict[str, Transformer],
+    quarantine_dir: Path,
+    *,
+    since: timedelta | None,
+    allow_empty: bool,
+    keep: int,
+) -> int:
+    """Generational publish (issue #47): stage the next generation from the
+    current one, run the ordinary sync against the staged copy, validate its
+    structure, then atomically flip `generations/CURRENT`. A staged
+    generation that fails to build, or fails validation, is discarded
+    before the pointer is ever touched — the last-good generation keeps
+    serving and nothing under `root` outside `generations/` is written."""
+    staged = generations.stage_generation(root)
+    staged_ledger_path = staged / ledger_path.relative_to(root)
+    staged_quarantine_dir = staged / quarantine_dir.relative_to(root)
+    try:
+        staged_ledger = Ledger.load(staged_ledger_path)
+        exit_code = _sync(
+            staged,
+            staged_ledger,
+            staged_ledger_path,
+            specs,
+            transformers,
+            staged_quarantine_dir,
+            since=since,
+            allow_empty=allow_empty,
+            true_root=root,
+        )
+        generations.validate_generation(staged)
+    except generations.GenerationValidationError as exc:
+        generations.discard_generation(staged)
+        print(f"generation rejected: {exc}", file=sys.stderr)
+        return 2
+    except Exception:
+        generations.discard_generation(staged)
+        raise
+    generations.publish_generation(root, staged)
+    generations.prune_generations(root, keep)
+    return exit_code
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Synchronize sources into the knowledge tree (source-authoritative)."
@@ -556,6 +614,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config_path = args.config if args.config is not None else _default_config()
         embeddings_config = embeddings_config_from_file(config_path)
+        generations_on = generations.generations_enabled_from_file(config_path)
+        generations_keep = generations.generations_keep_from_file(config_path)
         ledger_path, quarantine_dir, specs, catalog_bundles = load_config(config_path)
         sources = [source for source, _, _ in specs]
         ledger = Ledger.load(ledger_path)
@@ -581,8 +641,19 @@ def main(argv: list[str] | None = None) -> int:
     global _post_sync
     previous_post_sync = _post_sync
     if embeddings_config is not None:
-        _post_sync = make_post_sync_hook(embeddings_config)
+        _post_sync = make_post_sync_hook(embeddings_config, root)
     try:
+        if generations_on:
+            return _sync_generation(
+                root,
+                ledger_path,
+                specs,
+                transformers,
+                quarantine_dir,
+                since=args.since,
+                allow_empty=args.allow_empty,
+                keep=generations_keep,
+            )
         return _sync(
             root,
             ledger,

@@ -68,7 +68,8 @@ src/okf_mcp/                    MCP server package
 ├── authz.py                    per-resource grants + JSONL audit log
 ├── server.py                   MCP server (stdio) exposing the tools
 ├── validator.py                bundle validator CLI (also run in CI)
-└── ingest/                     okf-ingest: Source connectors → provenance-stamped drafts
+└── ingest/                     okf-ingest: Source connectors → provenance-stamped drafts,
+                                generations.py: staged generational publish (issue #47)
 docs/inversion.md               the reasoning: knowledge as pipeline input, not exhaust
 docs/demo.md                    end-to-end walkthrough: MRR investigation + personas
 docs/usage.md                   how to run, author, and consume the bundles
@@ -127,6 +128,40 @@ installed or a store present, behaviour is identical to keyword-only search.
 See [docs/usage.md](docs/usage.md#semantic-search-optional) for the config
 block and enabling steps.
 
+### Generational publish + hot reload (optional)
+
+`okf-ingest sync` normally writes in place. Opting a knowledge root into
+`generations: true` (in `ingest.yaml`) switches sync to **generational
+publish**: the next full tree (`bundles/` + ledger) is staged under
+`generations/<id>/`, validated, and only then does a `generations/CURRENT`
+pointer file flip — via `os.replace`, atomic on POSIX and requiring no git
+repository. Readers resolve the pointer and either see the previous
+generation, complete, or the new one, complete — never a half-written tree.
+A staged generation that fails validation, or a run that errors before it
+finishes, is discarded before the pointer is ever touched, so the last-good
+generation keeps serving. Git, when the root is a repo, remains the audit
+trail (one commit per run, as before) — never the publish mechanism.
+
+```
+generations/
+├── CURRENT              → "20260711T142233-000004" (plain text, atomically replaced)
+├── 20260711T140901-000002/   bundles/ + ingest/ledger.yaml (superseded, retained)
+└── 20260711T142233-000004/   bundles/ + ingest/ledger.yaml (CURRENT)
+```
+
+A server process resolves `CURRENT` once at startup and serves that
+generation for its lifetime — under stdio the process *is* the session, so
+this alone gives every connection a stable snapshot while sync advances
+generations underneath it. A long-lived process (a future HTTP transport,
+or a stdio host kept warm across sessions) opts into `OKF_HOT_RELOAD=1`,
+which re-checks the pointer before answering each tool call (one `stat()`)
+and swaps in a freshly built index — in-flight calls keep the object they
+already hold. The embedding store (`ingest/embeddings.db`) is **not**
+staged per generation: it is content-hash-keyed and shared across every
+generation, so old and new views alike share its cache with no copy cost.
+See [docs/usage.md](docs/usage.md#generational-publish-optional) for
+enabling steps, retention, and that sharing tradeoff.
+
 ## Status & roadmap
 
 Development is issue-driven; every issue carries acceptance criteria. Shipped:
@@ -148,6 +183,10 @@ Development is issue-driven; every issue carries acceptance criteria. Shipped:
 - **The write-back loop** (#38): `propose_upstream` sends what an agent
   learned to the owning sector's source as a branch for *their* review; the
   next sync brings accepted knowledge back — the inversion as a cycle.
+- **Generational atomic publish + hot reload** (#47): sync stages, validates,
+  then atomically flips a `generations/CURRENT` pointer — no git required;
+  a server pins its generation at startup and long-lived processes hot-swap
+  on `OKF_HOT_RELOAD=1` without dropping connections.
 
 The [inversion vision](docs/inversion.md) is fully implemented at demo scale;
 how sectors plug in their own sources is documented as

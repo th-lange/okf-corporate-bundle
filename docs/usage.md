@@ -19,6 +19,13 @@ never widen visibility:
 - `OKF_BUNDLE_DIRS` — explicit bundle list, separated by the OS path
   separator (`:` on Linux/macOS); overrides the knowledge root. With neither
   set, the repo's demo fixtures are served.
+- `OKF_HOT_RELOAD` — opt-in for long-lived server processes: `1`/`true`
+  checks the `generations/CURRENT` pointer before answering each tool call
+  and hot-swaps to a new generation without restarting (see
+  [Generational publish](#generational-publish-optional)). Unset (the
+  default) pins the generation resolved at startup for the process's
+  lifetime — the right default under stdio, where the process *is* the
+  session.
 - `OKF_TOKEN` — bearer token, resolved to a scope set by the auth layer.
 - `OKF_AUTH_CONFIG` — auth config path (default: `config/auth.yaml`).
 - `OKF_SCOPES` — comma-separated scope labels; local dev override used only
@@ -369,6 +376,56 @@ only for concept ids already in the caller's scoped view
 (`OkfIndex.visible_to`), so an out-of-scope concept can never surface via
 similarity, no matter how close a match its embedding is.
 
+### Generational publish (optional)
+
+Off by default; sync writes in place, exactly as above. To enable it, add
+one key to `<knowledge-root>/ingest.yaml`:
+
+```yaml
+generations: true
+generations_keep: 5    # optional, default 5 — older generations are pruned
+```
+
+With it set, each `okf-ingest sync` run stages the *next full* knowledge
+tree under `<knowledge-root>/generations/<id>/` — seeded from the current
+generation via hardlinks (so a run only pays disk for what actually
+changed), then run through the exact same add/replace/remove pipeline
+described above, including the per-source isolation, the ledger, and the
+git commit (when the root is a repo). Before publishing, the staged tree
+gets a cheap structural check (every target bundle still has an
+`index.md`); only then does `generations/CURRENT` — a plain text file
+naming the generation — get flipped via `os.replace`, atomic on POSIX and
+requiring no git repository at all. A run that raises partway through, or
+fails that check, is discarded before the pointer is ever touched: the
+previous generation is untouched and keeps serving. Generations beyond
+`generations_keep` (default 5, most-recent-first) are pruned after a
+successful flip; `CURRENT` itself is never pruned.
+
+**The embedding store is not staged per generation.** It stays a single
+shared sqlite file at `<root>/ingest/embeddings.db`, keyed on
+`(content_sha256, model_id)` — the same key regardless of which generation
+a concept currently lives in. This is a deliberate tradeoff: copying it per
+generation would be wasteful (the vectors rarely change) and unnecessary
+(lookups are always scoped to the pinned view's own concept ids, via
+`OkfIndex.visible_to`). The worst case for an old pinned view querying a
+renamed-since concept is a missed vector — never a leak of a vector that
+belongs to a generation the caller can't see, because the lookup is keyed
+by content hash and filtered to ids that view actually has.
+
+**Serving pins a generation, not a moment.** `build_server()` resolves
+`generations/CURRENT` once at startup and serves that generation for the
+process's lifetime — under stdio the process *is* the session, so a
+concurrent `sync` never changes an in-flight connection's view. A
+long-lived process (not stdio-per-connection) sets `OKF_HOT_RELOAD=1` to
+re-check the pointer before each tool call and hot-swap to a fresh index
+when it moves — a plain reference reassignment, so in-flight calls keep
+the object they already read and the next call sees the new generation,
+no restart, no dropped connection.
+
+A knowledge root with no `generations/CURRENT` pointer — every existing
+root, and any root with `generations` left unset — behaves exactly as
+before: `discover_bundles` reads `<root>/bundles/` directly.
+
 ### Proposing changes upstream (`propose_upstream`)
 
 Agents never write to the brain — nothing does, except sync. When an agent
@@ -405,9 +462,12 @@ serves lives outside, under a single knowledge root (`OKF_KNOWLEDGE_ROOT`):
 │   ├── acme-knowledge/
 │   └── acme-knowledge-restricted/
 ├── ingest.yaml              sync source configuration
-└── ingest/
-    ├── quarantine/          failed conversions (last-known-good stays served)
-    └── ledger.yaml          sync ledger (hash-keyed identity)
+├── ingest/
+│   ├── quarantine/          failed conversions (last-known-good stays served)
+│   └── ledger.yaml          sync ledger (hash-keyed identity)
+└── generations/             only when `generations: true` — see above;
+    ├── CURRENT              absent entirely on a plain (legacy) root
+    └── <id>/                bundles/ + ingest/ledger.yaml per generation
 ```
 
 With a root configured, the server serves every bundle under

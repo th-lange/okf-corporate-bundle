@@ -29,7 +29,8 @@ bug — fix it when you find it, even if it isn't your change.
 ```
 bundles/acme-knowledge/             internal knowledge bundle (the demo corpus)
 bundles/acme-knowledge-restricted/  restricted bundle (separate repo in production)
-src/okf_mcp/knowledge.py            knowledge-root discovery (OKF_KNOWLEDGE_ROOT)
+src/okf_mcp/knowledge.py            knowledge-root discovery + generation pointer
+                                    resolution (OKF_KNOWLEDGE_ROOT, resolve_root)
 src/okf_mcp/parser.py               frontmatter + link extraction
 src/okf_mcp/index.py                in-memory index: lookup, search, follow_links,
                                     per-session scope filtering (visible_to)
@@ -51,7 +52,9 @@ src/okf_mcp/ingest/                 okf-ingest: Source connectors (sources.py: g
                                     drive.py: gdrive, s3.py: s3), Transformer seam
                                     (transform.py: passthrough, llm.py: toolless
                                     worker + mechanical checks), hash-keyed ledger
-                                    (ledger.py), sync engine + CLI (sync / status)
+                                    (ledger.py), sync engine + CLI (sync / status),
+                                    generations.py: staged generational publish +
+                                    CURRENT pointer flip + retention (issue #47)
 config/ingest.yaml                  demo sync source configuration
 <root>/ingest/ledger.yaml           committed ledger: source doc → hash, concept
 tests/                              pytest suite, one file per feature
@@ -121,3 +124,14 @@ CI runs lint, tests, and the validator on every push — all three must pass.
   set intersection over the per-session filtered index (`OkfIndex.visible_to`);
   every serving path must go through that view, and no MCP tool may ever accept
   scope labels as a parameter.
+- **Generational publish is opt-in and additive.** A knowledge root with
+  `generations: true` in `ingest.yaml` (issue #47) publishes to a staged
+  `generations/<id>/`, validated, then flips `generations/CURRENT` via
+  `os.replace` — a plain-filesystem mechanism, never git (`_commit` already
+  returns `None` on a non-git root). Every existing plain-directory root
+  keeps working unchanged — `okf_mcp.knowledge.resolve_root` only resolves
+  the pointer when one exists. A server pins its generation at
+  `build_server()` time and serves it for the process's lifetime;
+  long-lived processes opt into `OKF_HOT_RELOAD=1` to hot-swap on pointer
+  change without dropping connections. The embedding store is never staged
+  per generation — it stays shared at `<root>/ingest/embeddings.db`.

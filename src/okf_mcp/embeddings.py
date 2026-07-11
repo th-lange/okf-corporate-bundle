@@ -337,9 +337,15 @@ def embeddings_config_from_file(config_path: Path) -> dict | None:
     return block if isinstance(block, dict) else None
 
 
-def make_post_sync_hook(config: dict) -> Callable[..., None]:
+def make_post_sync_hook(config: dict, store_root: Path) -> Callable[..., None]:
     """Build a `_post_sync(root, ledger, specs)`-shaped hook from an
     `embeddings:` config block ({model, path}, both optional).
+
+    `store_root` is always the true `$OKF_KNOWLEDGE_ROOT` — the embedding
+    store is content-hash-keyed and shared across generations (issue #47),
+    never staged per generation, so it stays fixed even when the hook's
+    `root` argument (the tree to read concept bodies from) is a staged
+    generation directory.
 
     Runs `sync_embeddings` when `sentence-transformers` is importable; when
     it isn't (the `semantic` extra not installed), logs a clear skip naming
@@ -357,7 +363,7 @@ def make_post_sync_hook(config: dict) -> Callable[..., None]:
                 model_id,
             )
             return
-        store = EmbeddingStore(Path(root) / store_relative_path)
+        store = EmbeddingStore(Path(store_root) / store_relative_path)
         try:
             count = sync_embeddings(root, ledger, SentenceTransformerEncoder(model_id), store)
             logger.info("embedded %d document(s) under model %s", count, model_id)
