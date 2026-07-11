@@ -11,9 +11,17 @@ quarantine: ingest/quarantine
 # embeddings:
 #   model: sentence-transformers/all-MiniLM-L6-v2
 #   path: ingest/embeddings.db
+# Optional: cadence for the `watch` background worker (issue #48).
+# `Nm|Nh|Nd` (minutes/hours/days) — cron syntax is out of scope, see
+# okf_mcp.ingest.scheduler for why. A per-source `schedule:` (below)
+# overrides this; a source with neither uses `watch`'s own `--interval`
+# as its cadence. Absent this key entirely -> only the per-source
+# override (or `--interval`) governs when a source is due.
+# schedule: 1h
 sources:
   - name: self-docs
     type: git
     url: .
     paths: ["docs/*.md"]
     target: acme-knowledge/imported
+    # schedule: 15m   # per-source override of the global `schedule:` above

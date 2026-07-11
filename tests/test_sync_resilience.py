@@ -70,7 +70,7 @@ def kroot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
 
 def run(kroot: dict, specs: list, **kwargs) -> tuple[int, Ledger]:
     ledger = Ledger.load(kroot["ledger_path"])
-    transformers = {source.name: PassthroughTransformer() for source, _, _ in specs}
+    transformers = {source.name: PassthroughTransformer() for source, *_ in specs}
     code = _sync(
         kroot["root"], ledger, kroot["ledger_path"], specs, transformers, kroot["quarantine"], **kwargs
     )
@@ -88,7 +88,7 @@ def test_failed_source_does_not_block_healthy_source(kroot: dict, capsys) -> Non
     seed.record("fake://broken/old", "broken", "bundles/b/old.md", "r0", "deadbeef")
     seed.save()
 
-    specs = [(healthy, "passthrough", "a"), (broken, "passthrough", "b")]
+    specs = [(healthy, "passthrough", "a", None), (broken, "passthrough", "b", None)]
     code, ledger = run(kroot, specs)
     out = capsys.readouterr().out
 
@@ -101,7 +101,7 @@ def test_failed_source_does_not_block_healthy_source(kroot: dict, capsys) -> Non
 
 def test_unconfigured_source_is_skipped_not_failed(kroot: dict, capsys) -> None:
     unconfigured = FakeSource("nocreds", error=SourceUnconfiguredError("missing TOKEN"))
-    code, _ = run(kroot, [(unconfigured, "passthrough", "kb")])
+    code, _ = run(kroot, [(unconfigured, "passthrough", "kb", None)])
     out = capsys.readouterr().out
 
     assert code == 0  # SKIPPED alone never fails the run
@@ -116,7 +116,7 @@ def test_empty_source_with_prior_entries_warns_and_skips_sweep(kroot: dict, caps
     seed.save()
 
     empty_source = FakeSource("c-src", docs=())
-    specs = [(empty_source, "passthrough", "c")]
+    specs = [(empty_source, "passthrough", "c", None)]
 
     code, ledger = run(kroot, specs)
     err = capsys.readouterr().err
@@ -138,11 +138,13 @@ def test_sweep_is_scoped_per_source(kroot: dict) -> None:
 
     source_a = FakeSource("src-a", docs=(doc_a1, doc_a2))
     source_b = FakeSource("src-b", docs=(doc_b1,))
-    run(kroot, [(source_a, "passthrough", "a"), (source_b, "passthrough", "b")])
+    run(kroot, [(source_a, "passthrough", "a", None), (source_b, "passthrough", "b", None)])
 
     # upstream removes doc_a1 only; source b is untouched
     source_a2 = FakeSource("src-a", docs=(doc_a2,))
-    code, ledger = run(kroot, [(source_a2, "passthrough", "a"), (source_b, "passthrough", "b")])
+    code, ledger = run(
+        kroot, [(source_a2, "passthrough", "a", None), (source_b, "passthrough", "b", None)]
+    )
 
     assert code == 0
     assert "removed_at" in ledger.entry("fake://a/1")
@@ -158,7 +160,7 @@ def test_since_defers_fresh_entries_and_processes_stale_ones(kroot: dict) -> Non
     seed.entry(uri)["synced_at"] = datetime.now(UTC).isoformat(timespec="seconds")
     seed.save()
 
-    code, ledger = run(kroot, [(source, "passthrough", "kb")], since=timedelta(days=1))
+    code, ledger = run(kroot, [(source, "passthrough", "kb", None)], since=timedelta(days=1))
     assert code == 0
     assert ledger.entry(uri)["content_sha256"] == "placeholder-sha"  # deferred: untouched
 
@@ -167,7 +169,7 @@ def test_since_defers_fresh_entries_and_processes_stale_ones(kroot: dict) -> Non
     fresh_seed.entry(uri)["synced_at"] = stale.isoformat(timespec="seconds")
     fresh_seed.save()
 
-    code, ledger = run(kroot, [(source, "passthrough", "kb")], since=timedelta(days=1))
+    code, ledger = run(kroot, [(source, "passthrough", "kb", None)], since=timedelta(days=1))
     assert code == 0
     assert ledger.entry(uri)["content_sha256"] != "placeholder-sha"  # stale: processed
 
@@ -175,7 +177,7 @@ def test_since_defers_fresh_entries_and_processes_stale_ones(kroot: dict) -> Non
 def test_mark_seen_refreshes_synced_at(kroot: dict) -> None:
     uri = "fake://kb/unchanged"
     source = FakeSource("u-src", docs=(doc(uri, "one.md", "r1"),))
-    run(kroot, [(source, "passthrough", "kb")])
+    run(kroot, [(source, "passthrough", "kb", None)])
     seed = Ledger.load(kroot["ledger_path"])
     old_synced_at = seed.entry(uri)["synced_at"]
     seed.entry(uri)["synced_at"] = "2000-01-01T00:00:00+00:00"
@@ -183,7 +185,7 @@ def test_mark_seen_refreshes_synced_at(kroot: dict) -> None:
 
     # same content, new revision -> "unchanged" path -> mark_seen -> refreshed synced_at
     same_content_new_rev = FakeSource("u-src", docs=(doc(uri, "one.md", "r2"),))
-    run(kroot, [(same_content_new_rev, "passthrough", "kb")])
+    run(kroot, [(same_content_new_rev, "passthrough", "kb", None)])
     ledger = Ledger.load(kroot["ledger_path"])
     assert ledger.entry(uri)["synced_at"] != "2000-01-01T00:00:00+00:00"
     assert ledger.entry(uri)["synced_at"] >= old_synced_at

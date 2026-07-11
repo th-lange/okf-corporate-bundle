@@ -49,12 +49,15 @@ src/okf_mcp/writeback.py            upstream proposals: branch in the owning rep
                                     or suggestion artifact for non-git sources
 src/okf_mcp/validator.py            bundle validator CLI (okf-validate)
 src/okf_mcp/ingest/                 okf-ingest: Source connectors (sources.py: git,
-                                    drive.py: gdrive, s3.py: s3), Transformer seam
-                                    (transform.py: passthrough, llm.py: toolless
-                                    worker + mechanical checks), hash-keyed ledger
-                                    (ledger.py), sync engine + CLI (sync / status),
+                                    drive.py: gdrive, s3.py: s3),
+                                    Transformer seam (transform.py: passthrough,
+                                    llm.py: toolless worker + mechanical checks),
+                                    hash-keyed ledger (ledger.py), sync engine + CLI
+                                    (sync / status / watch — cli.py),
                                     generations.py: staged generational publish +
-                                    CURRENT pointer flip + retention (issue #47)
+                                    CURRENT pointer flip + retention (issue #47),
+                                    scheduler.py: `watch` cadence, overlap
+                                    lockfile, graceful shutdown (issue #48)
 config/ingest.yaml                  demo sync source configuration
 <root>/ingest/ledger.yaml           committed ledger: source doc → hash, concept
 tests/                              pytest suite, one file per feature
@@ -72,6 +75,7 @@ uv run ruff check                        # lint (line length 100)
 uv run okf-validate bundles/acme-knowledge bundles/acme-knowledge-restricted
 uv run okf-mcp                           # run the MCP server (stdio); OKF_BUNDLE_DIR selects the bundle
 uv run okf-ingest sync                   # mirror sources into $OKF_KNOWLEDGE_ROOT (source-authoritative)
+uv run okf-ingest watch --once           # one background-sync tick (systemd-timer style)
 uv sync --extra semantic                 # optional: enable embeddings (search_concepts, ingest sync)
 ```
 
@@ -135,3 +139,14 @@ CI runs lint, tests, and the validator on every push — all three must pass.
   long-lived processes opt into `OKF_HOT_RELOAD=1` to hot-swap on pointer
   change without dropping connections. The embedding store is never staged
   per generation — it stays shared at `<root>/ingest/embeddings.db`.
+- **Background sync is opt-in scheduling, not a new sync path.** `okf-ingest
+  watch` (issue #48) reuses `_sync`/`_sync_generation` unmodified, restricted
+  each tick to whichever sources are due per `schedule:` (per-source > global
+  > the loop's own `--interval`); it never changes sync/publish semantics,
+  only when they run. A lockfile at `<root>/ingest/sync.lock`
+  (`scheduler.SyncLock`) serializes `sync` and every `watch` tick against the
+  same knowledge root — reclaimed automatically once its holder is dead or
+  the lock is older than 6 hours. A `FAILED` source (issue #46) during a
+  tick is logged and simply retried on its own next cadence; the loop never
+  exits on a source failure, and SIGINT/SIGTERM only take effect between
+  ticks (the in-flight tick always finishes).

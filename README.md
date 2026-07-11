@@ -69,7 +69,8 @@ src/okf_mcp/                    MCP server package
 ├── server.py                   MCP server (stdio) exposing the tools
 ├── validator.py                bundle validator CLI (also run in CI)
 └── ingest/                     okf-ingest: Source connectors → provenance-stamped drafts,
-                                generations.py: staged generational publish (issue #47)
+                                generations.py: staged generational publish (issue #47),
+                                scheduler.py: `watch` background worker (issue #48)
 docs/inversion.md               the reasoning: knowledge as pipeline input, not exhaust
 docs/demo.md                    end-to-end walkthrough: MRR investigation + personas
 docs/usage.md                   how to run, author, and consume the bundles
@@ -187,6 +188,12 @@ Development is issue-driven; every issue carries acceptance criteria. Shipped:
   then atomically flips a `generations/CURRENT` pointer — no git required;
   a server pins its generation at startup and long-lived processes hot-swap
   on `OKF_HOT_RELOAD=1` without dropping connections.
+- **Background sync worker** (#48): `okf-ingest watch` runs sync on a
+  config-driven, per-source cadence — built on generational publish (a
+  scheduled run never disturbs a live session) and per-source isolation (one
+  source's failure never stalls the schedule); an overlap-guarding lockfile
+  serializes it against `sync`; systemd-timer and docker-compose sidecar
+  deployment recipes are in [docs/usage.md](docs/usage.md#background-sync-worker-okf-ingest-watch-optional).
 
 The [inversion vision](docs/inversion.md) is fully implemented at demo scale;
 how sectors plug in their own sources is documented as
@@ -205,6 +212,7 @@ uv run ruff check                        # lint
 uv run okf-validate bundles/acme-knowledge bundles/acme-knowledge-restricted
 uv run okf-mcp                           # start the MCP server (stdio)
 uv run okf-ingest                        # pull configured sources into draft concepts
+uv run okf-ingest watch --once           # one background-sync tick (see docs/usage.md)
 ```
 
 CI runs lint, tests, and the bundle validator on every push.

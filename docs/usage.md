@@ -188,6 +188,7 @@ uv run okf-ingest status           # classify only, change nothing
 uv run okf-ingest sync --config my.yaml
 uv run okf-ingest sync --since 3d              # skip docs synced within the last 3 days
 uv run okf-ingest sync --allow-empty           # sweep a source even if it returned 0 docs
+uv run okf-ingest watch --once                 # background worker, one tick — see below
 ```
 
 Sync requires `OKF_KNOWLEDGE_ROOT` — the operator repo's fixture bundles are
@@ -425,6 +426,132 @@ no restart, no dropped connection.
 A knowledge root with no `generations/CURRENT` pointer — every existing
 root, and any root with `generations` left unset — behaves exactly as
 before: `discover_bundles` reads `<root>/bundles/` directly.
+
+### Background sync worker (`okf-ingest watch`, optional)
+
+`sync` only runs when a human (or a CI step) invokes it. `okf-ingest watch`
+(issue #48) adds a background mode: a loop that syncs each source on its own
+cadence, so the brain stays fresh without operator action. It reuses the
+exact same sync path as `sync` — per-source isolation (above) and, when
+`generations: true` is set, the generational atomic flip — restricted each
+tick to whichever sources are due; nothing about sync/publish semantics
+changes, only *when* they run.
+
+```bash
+uv run okf-ingest watch                    # run forever, ticking on --interval
+uv run okf-ingest watch --once             # one tick, then exit (systemd timer)
+uv run okf-ingest watch --interval 5m      # loop cadence + fallback for unscheduled sources
+uv run okf-ingest watch --dry-run          # log which sources are due, sync nothing
+```
+
+**Cadence** is config-driven, `Nm|Nh|Nd` (minutes/hours/days) — cron syntax
+is deliberately out of scope: the two deployment recipes below only need
+"every N minutes/hours/days", and a real cron parser plus calendar/timezone
+handling isn't worth carrying for a background poller. A commented example
+ships in `config/ingest.yaml`:
+
+```yaml
+schedule: 1h              # global default cadence for `watch`
+sources:
+  - name: compliance-handbook
+    schedule: 15m          # per-source override of the global default
+    # ...
+```
+
+Precedence per source: its own `schedule:` > the config's global `schedule:`
+> `watch`'s own `--interval`. That last fallback is deliberate — a source
+with no schedule anywhere still gets synced, at the loop's own tick cadence,
+rather than never running under `watch` at all; it's unaffected either way
+when invoked via a plain, manually-run `sync`. A source with no recorded
+prior run (state lives at `<root>/ingest/schedule_state.json`) is due on the
+very first tick that sees it.
+
+**Overlap guard.** A lockfile at `<root>/ingest/sync.lock` is taken by both
+`sync` and every `watch` tick, so two syncs never race the same knowledge
+root: a held lock makes `sync` fail fast with a clear error, and makes a
+`watch` tick skip (logged, not fatal) rather than block or corrupt anything.
+A lock whose holder process is dead, or that is simply older than 6 hours,
+is reclaimed automatically — see `okf_mcp.ingest.scheduler.SyncLock` for the
+exact rules.
+
+**Failure isolation holds exactly as under `sync`.** A `FAILED` source is
+logged in that tick's per-source report and simply retried on its own next
+cadence — it never stops the loop, and the last-known-good state keeps
+serving throughout. Every tick logs a per-source `OK`/`SKIPPED`/`FAILED`
+line, and, when generational publish is on, the generation id it published.
+
+**Shutdown.** SIGINT/SIGTERM request a graceful stop that takes effect only
+*between* ticks: the in-flight tick always finishes (never interrupted
+mid-sync) before the process exits 0.
+
+#### Deployment recipe: systemd timer
+
+One tick per invocation (`--once`), scheduled by systemd rather than the
+loop itself — the simplest option when the host already runs systemd:
+
+```ini
+# /etc/systemd/system/okf-ingest-watch.service
+[Unit]
+Description=okf-ingest: one background sync tick
+
+[Service]
+Type=oneshot
+Environment=OKF_KNOWLEDGE_ROOT=/srv/acme-knowledge
+ExecStart=/usr/local/bin/uv run --project /opt/okf-corporate-bundle okf-ingest watch --once
+```
+
+```ini
+# /etc/systemd/system/okf-ingest-watch.timer
+[Unit]
+Description=Run okf-ingest-watch every 5 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
+```
+
+`systemctl enable --now okf-ingest-watch.timer`. `OKF_KNOWLEDGE_ROOT` points
+at a path outside the operator checkout — never bake knowledge into the
+image/checkout the timer runs from.
+
+#### Deployment recipe: docker-compose sidecar
+
+The loop itself (`watch`, no `--once`) as a long-running sidecar next to the
+MCP server, both mounting the same external knowledge root — never baked
+into either image:
+
+```yaml
+# docker-compose.yml (excerpt)
+services:
+  okf-mcp:
+    image: okf-operator
+    stdin_open: true
+    environment:
+      OKF_KNOWLEDGE_ROOT: /knowledge
+      OKF_TOKEN: ${OKF_TOKEN}
+    volumes:
+      - acme-knowledge:/knowledge
+
+  okf-ingest-watch:
+    image: okf-operator
+    command: ["okf-ingest", "watch", "--interval", "5m"]
+    environment:
+      OKF_KNOWLEDGE_ROOT: /knowledge
+    volumes:
+      - acme-knowledge:/knowledge
+    restart: unless-stopped
+
+volumes:
+  acme-knowledge:
+    external: true   # provisioned/backed up outside compose — never `docker build`-ed in
+```
+
+`docker compose stop okf-ingest-watch` sends SIGTERM, which the loop
+honors gracefully (finishes its in-flight tick, exits 0) before the
+container stops.
 
 ### Proposing changes upstream (`propose_upstream`)
 

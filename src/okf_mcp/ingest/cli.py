@@ -7,6 +7,9 @@ Commands:
                          what the owner removed — one git commit per run
     okf-ingest status    classify every document (new / unchanged / modified
                          / removed) against the ledger, changing nothing
+    okf-ingest watch     background worker: sync each source on its own
+                         cadence in a loop (or once, with --once) — see
+                         "Scheduling" below
 
 There are no drafts and no editorial gate: curation happens at the source,
 where the owning sector's own review process decides what gets published.
@@ -40,11 +43,25 @@ Sync writes only under OKF_KNOWLEDGE_ROOT — the operator repo's fixture
 bundles are read-only demo content, so `sync` refuses to run without a
 knowledge root.
 
+Scheduling (issue #48): `okf-ingest watch` runs the same sync path as
+`sync`, in a loop, restricted each tick to whichever sources are due. Cadence
+is config-driven — see `schedule:` below and `okf_mcp.ingest.scheduler` for
+the full grammar and due-time semantics (per-source override > global
+default > the loop's own `--interval`, which is also the fallback cadence
+for a source with no schedule of its own). `--once` runs a single tick and
+exits — what a systemd timer calls. Every tick publishes through the
+generational flip when `generations: true` is set (issue #47), so a
+background run never disturbs a live session, and a FAILED source (issue
+#46) stays isolated and simply retries on its next cadence. A lockfile
+under `<root>/ingest/sync.lock` serializes `sync` and `watch` against the
+same knowledge root — see `SyncLock` for the reclaim rules on a stale lock.
+
 Config (YAML, default `$OKF_KNOWLEDGE_ROOT/ingest.yaml`):
 
     ledger: ingest/ledger.yaml
     quarantine: ingest/quarantine
     catalog_bundles: [bundles/acme-knowledge]   # link targets for the llm transformer
+    # schedule: 1h                              # global default cadence for `watch`
     sources:
       - name: compliance-handbook
         type: git
@@ -52,6 +69,7 @@ Config (YAML, default `$OKF_KNOWLEDGE_ROOT/ingest.yaml`):
         paths: ["policies/**/*.md"]
         transformer: llm                    # default: passthrough
         target: acme-knowledge/compliance   # bundle[/dir] under <root>/bundles/
+        # schedule: 15m                     # per-source override (Nm|Nh|Nd)
 """
 
 from __future__ import annotations
@@ -69,7 +87,7 @@ import yaml
 
 from okf_mcp.embeddings import embeddings_config_from_file, make_post_sync_hook
 from okf_mcp.index import OkfIndex
-from okf_mcp.ingest import generations
+from okf_mcp.ingest import generations, scheduler
 from okf_mcp.ingest.drive import DriveSource
 from okf_mcp.ingest.ledger import Ledger
 from okf_mcp.ingest.llm import ClaudeClient, LlmError, LlmTransformer
@@ -94,7 +112,8 @@ from okf_mcp.validator import _check_document, _collect_ids, validate_bundle
 _DEFAULT_CATALOG = (REPO_ROOT / "bundles" / "acme-knowledge",)
 _TRANSFORMERS = ("passthrough", "llm")
 
-SourceSpec = tuple[Source, str, str]  # (source, transformer name, target)
+SourceSpec = tuple[Source, str, str, timedelta | None]
+# (source, transformer name, target, per-source `schedule:` override)
 
 
 class ConfigError(ValueError):
@@ -124,7 +143,16 @@ def _build_source(entry: object) -> SourceSpec:
             f"source {entry['name']!r} needs a `target` — the bundle[/dir] under "
             "<knowledge-root>/bundles/ its concepts sync into"
         )
-    return source, transformer, target.strip("/")
+    schedule_raw = entry.get("schedule")
+    schedule: timedelta | None = None
+    if schedule_raw is not None:
+        if not isinstance(schedule_raw, str):
+            raise ConfigError(f"source {entry['name']!r} `schedule` must be a string interval")
+        try:
+            schedule = scheduler.parse_interval(schedule_raw)
+        except scheduler.ScheduleConfigError as exc:
+            raise ConfigError(f"source {entry['name']!r}: {exc}") from exc
+    return source, transformer, target.strip("/"), schedule
 
 
 def _build_connector(entry: dict) -> Source:
@@ -133,16 +161,24 @@ def _build_connector(entry: dict) -> Source:
         if not isinstance(entry.get("url"), str):
             raise ConfigError(f"git source {entry['name']!r} needs a `url`")
         paths = entry.get("paths", ["**/*.md"])
-        return GitSource(name=entry["name"], url=entry["url"], paths=tuple(paths))
+        return GitSource(
+            name=entry["name"],
+            url=entry["url"],
+            paths=tuple(paths),
+        )
     if kind == "gdrive":
         if not isinstance(entry.get("folder_id"), str):
             raise ConfigError(f"gdrive source {entry['name']!r} needs a `folder_id`")
-        return DriveSource(name=entry["name"], folder_id=entry["folder_id"])
+        return DriveSource(
+            name=entry["name"], folder_id=entry["folder_id"]
+        )
     if kind == "s3":
         if not isinstance(entry.get("bucket"), str):
             raise ConfigError(f"s3 source {entry['name']!r} needs a `bucket`")
         return S3Source(
-            name=entry["name"], bucket=entry["bucket"], prefix=entry.get("prefix", "")
+            name=entry["name"],
+            bucket=entry["bucket"],
+            prefix=entry.get("prefix", ""),
         )
     raise ConfigError(
         f"unknown source type {kind!r} (known: git, gdrive, s3). New connectors "
@@ -169,7 +205,7 @@ def _build_transformers(
     transformers: dict[str, Transformer] = {}
     passthrough = PassthroughTransformer()
     llm: LlmTransformer | None = None
-    for source, kind, _ in specs:
+    for source, kind, _, _ in specs:
         if kind == "llm":
             if llm is None:
                 index = OkfIndex(*catalog_bundles)
@@ -430,7 +466,7 @@ def _sync(
     allow_empty: bool = False,
     true_root: Path | None = None,
 ) -> int:
-    for _, _, target in specs:
+    for _, _, target, _ in specs:
         bundle = target.split("/", 1)[0]
         if not (root / "bundles" / bundle / "index.md").is_file():
             print(
@@ -447,7 +483,7 @@ def _sync(
     pulled: dict[str, tuple[SourceSpec, list[SourceDocument]]] = {}
     outcomes: list[SourceOutcome] = []
     for spec in specs:
-        source, _, _ = spec
+        source, _, _, _ = spec
         try:
             docs = _pull_source(source)
         except SourceUnconfiguredError as exc:
@@ -465,7 +501,7 @@ def _sync(
     # Phase 2: apply each successfully-pulled source, then sweep only that
     # source's own ledger entries — isolation must hold for the sweep too.
     for name, (spec, docs) in pulled.items():
-        source, _, target = spec
+        source, _, target, _ = spec
         source_counts, source_failures, source_seen = _apply_source(
             root,
             source,
@@ -583,11 +619,105 @@ def _sync_generation(
     return exit_code
 
 
+@dataclass
+class IngestContext:
+    """Everything `sync`/`status`/`watch` need, loaded once from config."""
+
+    ledger_path: Path
+    quarantine_dir: Path
+    specs: list[SourceSpec]
+    catalog_bundles: tuple[Path, ...]
+    embeddings_config: dict | None
+    generations_on: bool
+    generations_keep: int
+    global_schedule: timedelta | None
+    root: Path | None
+
+
+def _load_context(config_path: Path) -> IngestContext:
+    """Load every config-derived input `sync`/`status`/`watch` share. The
+    optional-block accessors (embeddings, generations, schedule) are each
+    read-only and best-effort on their own; `load_config` is the strict
+    one and raises `ConfigError` on a real problem with `sources:`."""
+    embeddings_config = embeddings_config_from_file(config_path)
+    generations_on = generations.generations_enabled_from_file(config_path)
+    generations_keep = generations.generations_keep_from_file(config_path)
+    global_schedule = scheduler.global_schedule_from_file(config_path)
+    ledger_path, quarantine_dir, specs, catalog_bundles = load_config(config_path)
+    return IngestContext(
+        ledger_path=ledger_path,
+        quarantine_dir=quarantine_dir,
+        specs=specs,
+        catalog_bundles=catalog_bundles,
+        embeddings_config=embeddings_config,
+        generations_on=generations_on,
+        generations_keep=generations_keep,
+        global_schedule=global_schedule,
+        root=knowledge_root(),
+    )
+
+
+def _require_root(root: Path | None) -> int | None:
+    """The standard "no knowledge root" error + exit code 2 when `root` is
+    None, else None (proceed). Shared by `sync` and `watch` — both write
+    to the tree, unlike `status`."""
+    if root is not None:
+        return None
+    print(
+        "sync writes to the knowledge tree; set OKF_KNOWLEDGE_ROOT — the "
+        "operator repo's fixture bundles are read-only demo content.",
+        file=sys.stderr,
+    )
+    return 2
+
+
+def _interval_arg(value: str) -> timedelta:
+    """argparse `type=` for `--interval`: same grammar as a config
+    `schedule:` value, surfaced as a standard argparse usage error."""
+    try:
+        return scheduler.parse_interval(value)
+    except scheduler.ScheduleConfigError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _run_watch(
+    ctx: IngestContext, args: argparse.Namespace, transformers: dict[str, Transformer]
+) -> int:
+    """Wire the loaded config into `scheduler.run_watch`. Unlike one-shot
+    `sync`, the embeddings post-sync hook (if configured) stays installed
+    for the loop's whole lifetime, across every tick, not just one run."""
+    global _post_sync
+    previous_post_sync = _post_sync
+    if ctx.embeddings_config is not None:
+        _post_sync = make_post_sync_hook(ctx.embeddings_config, ctx.root)
+    try:
+        return scheduler.run_watch(
+            root=ctx.root,
+            ledger_path=ctx.ledger_path,
+            quarantine_dir=ctx.quarantine_dir,
+            specs=ctx.specs,
+            transformers=transformers,
+            generations_on=ctx.generations_on,
+            generations_keep=ctx.generations_keep,
+            global_default=ctx.global_schedule,
+            interval=args.interval,
+            sync_fn=_sync,
+            sync_generation_fn=_sync_generation,
+            once=args.once,
+            dry_run=args.dry_run,
+            allow_empty=args.allow_empty,
+        )
+    finally:
+        _post_sync = previous_post_sync
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Synchronize sources into the knowledge tree (source-authoritative)."
     )
-    parser.add_argument("command", nargs="?", choices=("sync", "status"), default="sync")
+    parser.add_argument(
+        "command", nargs="?", choices=("sync", "status", "watch"), default="sync"
+    )
     parser.add_argument(
         "--config",
         type=Path,
@@ -609,30 +739,44 @@ def main(argv: list[str] | None = None) -> int:
         help="sweep a source's ledger entries even when it returned zero "
         "documents this run (default: warn and skip the sweep)",
     )
+    parser.add_argument(
+        "--interval",
+        type=_interval_arg,
+        default=timedelta(minutes=5),
+        metavar="Nm|Nh|Nd",
+        help="watch: how often the loop wakes to check due sources — also the "
+        "fallback cadence for a source with no `schedule:` of its own and no "
+        "global default (default: 5m)",
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="watch: run a single tick then exit (what a systemd timer calls)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="watch: log which sources are due each tick without syncing them",
+    )
     args = parser.parse_args(argv)
 
     try:
         config_path = args.config if args.config is not None else _default_config()
-        embeddings_config = embeddings_config_from_file(config_path)
-        generations_on = generations.generations_enabled_from_file(config_path)
-        generations_keep = generations.generations_keep_from_file(config_path)
-        ledger_path, quarantine_dir, specs, catalog_bundles = load_config(config_path)
-        sources = [source for source, _, _ in specs]
-        ledger = Ledger.load(ledger_path)
+        ctx = _load_context(config_path)
+        sources = [source for source, *_ in ctx.specs]
+        ledger = Ledger.load(ctx.ledger_path)
         if args.command == "status":
             return _status(ledger, sources)
-        root = knowledge_root()
-        if root is None:
-            print(
-                "sync writes to the knowledge tree; set OKF_KNOWLEDGE_ROOT — the "
-                "operator repo's fixture bundles are read-only demo content.",
-                file=sys.stderr,
-            )
-            return 2
-        transformers = _build_transformers(specs, catalog_bundles)
+        root_error = _require_root(ctx.root)
+        if root_error is not None:
+            return root_error
+        transformers = _build_transformers(ctx.specs, ctx.catalog_bundles)
     except (ConfigError, KnowledgeRootError, LlmError, FileNotFoundError) as exc:
         print(exc, file=sys.stderr)
         return 2
+
+    if args.command == "watch":
+        return _run_watch(ctx, args, transformers)
 
     # Optional semantic search (issue #45): an `embeddings:` config block
     # swaps in a hook that embeds this run's ledger after _sync saves it;
@@ -640,30 +784,39 @@ def main(argv: list[str] | None = None) -> int:
     # global is restored so this process's next sync isn't affected.
     global _post_sync
     previous_post_sync = _post_sync
-    if embeddings_config is not None:
-        _post_sync = make_post_sync_hook(embeddings_config, root)
+    if ctx.embeddings_config is not None:
+        _post_sync = make_post_sync_hook(ctx.embeddings_config, ctx.root)
     try:
-        if generations_on:
-            return _sync_generation(
-                root,
-                ledger_path,
-                specs,
-                transformers,
-                quarantine_dir,
-                since=args.since,
-                allow_empty=args.allow_empty,
-                keep=generations_keep,
-            )
-        return _sync(
-            root,
-            ledger,
-            ledger_path,
-            specs,
-            transformers,
-            quarantine_dir,
-            since=args.since,
-            allow_empty=args.allow_empty,
-        )
+        lock = scheduler.SyncLock(scheduler.lock_path(ctx.root))
+        try:
+            with lock.held():
+                # Overlap guard (issue #48): serializes `sync` against any
+                # concurrent `watch` tick (or another `sync`) on the same
+                # knowledge root — see `scheduler.SyncLock`.
+                if ctx.generations_on:
+                    return _sync_generation(
+                        ctx.root,
+                        ctx.ledger_path,
+                        ctx.specs,
+                        transformers,
+                        ctx.quarantine_dir,
+                        since=args.since,
+                        allow_empty=args.allow_empty,
+                        keep=ctx.generations_keep,
+                    )
+                return _sync(
+                    ctx.root,
+                    ledger,
+                    ctx.ledger_path,
+                    ctx.specs,
+                    transformers,
+                    ctx.quarantine_dir,
+                    since=args.since,
+                    allow_empty=args.allow_empty,
+                )
+        except scheduler.LockHeld as exc:
+            print(exc, file=sys.stderr)
+            return 2
     finally:
         _post_sync = previous_post_sync
 
