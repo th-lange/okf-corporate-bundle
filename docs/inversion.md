@@ -123,6 +123,22 @@ vision is implemented, not aspiration:
   principal), the sector's own review decides, and the next sync brings
   accepted knowledge back. The inversion is a cycle, and the brain still has
   exactly one author: sync.
+- **Sectors stay independent, and the brain stays fresh** (#46, #48) — each
+  source is pulled and applied in isolation (an unconfigured source is
+  skipped, a failing one is reported and retried on its own cadence, and
+  neither touches another sector's entries), and a background worker
+  (`okf-ingest watch`) syncs every source on its own schedule, so freshness
+  no longer depends on a human remembering to run sync.
+- **Readers see snapshots, never construction sites** (#47) — sync can
+  publish each run as a staged, validated generation flipped live by an
+  atomic pointer; a serving process pins the generation it started on, and a
+  background publish never changes a running session's view.
+- **Meaning is indexed once per content, not once per run** (#45, #49) — an
+  optional embedding store keyed on the same content hash the ledger already
+  tracks means only new or changed documents are ever embedded (renames and
+  resurrections reuse their vector), a sector that already computed vectors
+  can ship them alongside its documents instead of having them recomputed,
+  and similarity search still answers only from the session's scoped view.
 
 And one boundary worth keeping: the brain holds **durable knowledge** —
 definitions, rules, runbooks, decisions — not the work items flowing through
