@@ -27,6 +27,13 @@ from mcp.server.fastmcp import FastMCP
 
 from okf_mcp.auth import ANONYMOUS, Authenticator, Principal, StaticTokenAuthenticator
 from okf_mcp.authz import AuditLog, ResourceAuthorizer
+from okf_mcp.embeddings import (
+    Encoder,
+    EmbeddingStore,
+    SentenceTransformerEncoder,
+    default_store_path,
+    sentence_transformers_available,
+)
 from okf_mcp.index import OkfIndex, UnknownConceptError, full, summary
 from okf_mcp.knowledge import REPO_ROOT, discover_bundles, knowledge_root
 from okf_mcp.writeback import ProposalError
@@ -48,6 +55,32 @@ def _default_bundle_dirs() -> Sequence[Path]:
     if root is not None:
         return discover_bundles(root)
     return _DEFAULT_BUNDLES
+
+
+def _resolve_semantic_search(
+    encoder: Encoder | None,
+) -> tuple[Encoder | None, EmbeddingStore | None]:
+    """The (encoder, store) pair `search_concepts` augments keyword ranking
+    with, or `(None, None)` when semantic search stays off.
+
+    Production default: a store must exist at the default path under
+    `$OKF_KNOWLEDGE_ROOT` (populated by `okf_mcp.embeddings.sync_embeddings`
+    during sync) and an encoder must be available — `sentence-transformers`
+    installed (the `semantic` extra) unless one was injected. No knowledge
+    root, no store file, or the extra missing all mean semantic search is
+    off and `search_concepts` behaves exactly like keyword-only search.
+    """
+    root = knowledge_root()
+    if root is None:
+        return None, None
+    store_path = default_store_path(root)
+    if not store_path.is_file():
+        return None, None
+    if encoder is None:
+        if not sentence_transformers_available():
+            return None, None
+        encoder = SentenceTransformerEncoder()
+    return encoder, EmbeddingStore(store_path)
 
 
 def _resolve_principal(
@@ -76,6 +109,7 @@ def build_server(
     token: str | None = None,
     authorizer: ResourceAuthorizer | None = None,
     audit_log: AuditLog | None = None,
+    encoder: Encoder | None = None,
 ) -> FastMCP:
     if bundle_dirs is None:
         bundle_dirs = _default_bundle_dirs()
@@ -89,6 +123,7 @@ def build_server(
         audit_path = os.environ.get("OKF_AUDIT_LOG")
         audit_log = AuditLog(Path(audit_path) if audit_path else None)
     index = OkfIndex(*bundle_dirs).visible_to(principal.scopes)
+    semantic_encoder, semantic_store = _resolve_semantic_search(encoder)
     mcp = FastMCP(
         "okf-knowledge",
         instructions=(
@@ -132,13 +167,46 @@ def build_server(
         summaries (id/type/title/description) — fetch bodies via get_concept.
         An empty list means nothing matched.
 
+        When semantic search is configured (a persistent embedding store
+        exists and an encoder is available), results are augmented after
+        keyword ranking: keyword hits keep today's order unchanged, then any
+        semantically-similar concepts not already among them are appended,
+        best cosine-similarity first, until `limit` is reached. Semantic
+        lookups never reach outside this session's visible concepts — only
+        already-scoped ids are ever queried against the vector store.
+        Without a configured store/encoder, behaviour is identical to
+        keyword-only search.
+
         Args:
             query: Keywords; all terms must match (case-insensitive).
             concept_type: Optional exact type filter, e.g. "Metric".
             tags: Optional tag filter; matches concepts carrying any of these tags.
             limit: Maximum results to return (default 20).
         """
-        return [summary(d) for d in index.search(query, concept_type, tags, limit)]
+        hits = index.search(query, concept_type, tags, limit)
+        if semantic_encoder is not None and semantic_store is not None and len(hits) < limit:
+            seen = {doc.id for doc in hits}
+            visible_ids = index.ids()
+            query_vector = semantic_encoder.encode([query])[0]
+            candidates = semantic_store.top_k(
+                semantic_encoder.model_id, visible_ids, query_vector, len(visible_ids)
+            )
+            for concept_id, _score in candidates:
+                if len(hits) >= limit:
+                    break
+                if concept_id in seen:
+                    continue
+                try:
+                    doc = index.get_concept(concept_id)
+                except UnknownConceptError:
+                    continue
+                if concept_type is not None and doc.type != concept_type:
+                    continue
+                if tags and not set(tags) & set(doc.frontmatter.get("tags") or []):
+                    continue
+                hits.append(doc)
+                seen.add(concept_id)
+        return [summary(d) for d in hits]
 
     @mcp.tool()
     def list_by_type(concept_type: str) -> list[dict]:

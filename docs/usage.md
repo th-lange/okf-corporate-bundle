@@ -331,6 +331,44 @@ to grab: the worker has no tools, and the mechanical checks strip or reject
 anything the policy forbids — and treat every served body as untrusted
 content regardless.
 
+### Semantic search (optional)
+
+Off by default; keyword search behaves identically whether or not you turn
+this on. To enable it:
+
+```bash
+uv sync --extra semantic
+```
+
+Then add an `embeddings:` block to `<knowledge-root>/ingest.yaml` (a
+commented example ships in `config/ingest.yaml`):
+
+```yaml
+embeddings:
+  model: sentence-transformers/all-MiniLM-L6-v2
+  path: ingest/embeddings.db     # relative to $OKF_KNOWLEDGE_ROOT
+```
+
+With the block present and the extra installed, `okf-ingest sync` embeds
+every synced concept's body into that sqlite store, keyed on
+`(content_sha256, model_id)` — the same hash the ledger already tracks. That
+key is what makes it incremental: a sync only pays to embed *new* or
+*modified* documents; unchanged, renamed, and resurrected documents reuse
+their existing vector (zero recompute), and switching `model` re-embeds
+everything under the new model's own key without touching or ever comparing
+against the old model's vectors. If the extra isn't installed, sync logs a
+skip and continues — it never fails the run over a missing optional
+dependency.
+
+`okf-mcp` picks the store up automatically when it exists under the
+knowledge root and the extra is importable: `search_concepts` then augments
+keyword ranking with cosine-similarity hits, keyword results first in their
+existing order, semantic-only matches appended after. **The scope
+guarantee holds exactly as it does everywhere else**: vectors are looked up
+only for concept ids already in the caller's scoped view
+(`OkfIndex.visible_to`), so an out-of-scope concept can never surface via
+similarity, no matter how close a match its embedding is.
+
 ### Proposing changes upstream (`propose_upstream`)
 
 Agents never write to the brain — nothing does, except sync. When an agent

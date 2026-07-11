@@ -5,6 +5,12 @@
 # sync refuses to run without a knowledge root.
 ledger: ingest/ledger.yaml
 quarantine: ingest/quarantine
+# Optional: embed synced concepts into a persistent vector store for
+# semantic search (requires `uv sync --extra semantic`). Path is relative to
+# the knowledge root. Absent this key entirely -> no embedding, no-op.
+# embeddings:
+#   model: sentence-transformers/all-MiniLM-L6-v2
+#   path: ingest/embeddings.db
 sources:
   - name: self-docs
     type: git

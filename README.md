@@ -63,6 +63,7 @@ src/okf_mcp/                    MCP server package
 ├── parser.py                   frontmatter + link extraction
 ├── index.py                    in-memory index: lookup, search, graph traversal
 ├── scopes.py                   effective-scope resolution + visibility rule
+├── embeddings.py               optional semantic search: hash-keyed vector store
 ├── auth.py                     pluggable Authenticator (IdP seam) + static demo impl
 ├── authz.py                    per-resource grants + JSONL audit log
 ├── server.py                   MCP server (stdio) exposing the tools
@@ -96,7 +97,7 @@ visibility. Current tools:
 
 | Tool | Answers |
 |---|---|
-| `search_concepts(query, type?, tags?, limit?)` | "Where do I start?" — ranked keyword search (title/aliases > tags > description > body), compact summaries only |
+| `search_concepts(query, type?, tags?, limit?)` | "Where do I start?" — ranked keyword search (title/aliases > tags > description > body), optionally augmented by semantic similarity when embeddings are configured; compact summaries only |
 | `list_by_type(type)` | "What metrics/runbooks/… exist?" |
 | `get_concept(id)` | "What is the authoritative definition?" — full frontmatter + body |
 | `follow_links(id, depth?)` | "What's connected?" — cycle-safe graph traversal, summaries + hop distance |
@@ -104,6 +105,27 @@ visibility. Current tools:
 
 List-style tools return summaries (id/type/title/description) — never bodies — so
 agents scan cheaply and fetch full text only for the concepts they actually need.
+
+### Semantic search (optional)
+
+`search_concepts` stays keyword-only by default. Installing the `semantic`
+extra (`uv sync --extra semantic`) and configuring an `embeddings:` block in
+`ingest.yaml` turns on a second layer: `okf-ingest sync` embeds each synced
+concept's body into a persistent, sqlite-backed vector store keyed by
+`(content_sha256, model_id)` under `$OKF_KNOWLEDGE_ROOT/ingest/embeddings.db`
+— never the operator repo. Because the key is the content hash the ledger
+already computes, sync only embeds *new*/*modified* documents; unchanged,
+renamed, and resurrected documents reuse their existing vector, so nothing is
+ever re-embedded for free. A model change re-embeds under its own key without
+touching or mixing with vectors from a prior model.
+
+At serving time `search_concepts` queries the store only for concept ids
+already in the caller's scoped view (`OkfIndex.visible_to`), then merges
+similarity hits after keyword hits — an out-of-scope concept's vector is
+never reachable, however close a semantic match it is. Without the extra
+installed or a store present, behaviour is identical to keyword-only search.
+See [docs/usage.md](docs/usage.md#semantic-search-optional) for the config
+block and enabling steps.
 
 ## Status & roadmap
 

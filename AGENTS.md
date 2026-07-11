@@ -34,6 +34,8 @@ src/okf_mcp/parser.py               frontmatter + link extraction
 src/okf_mcp/index.py                in-memory index: lookup, search, follow_links,
                                     per-session scope filtering (visible_to)
 src/okf_mcp/scopes.py               effective-scope resolution + visibility rule
+src/okf_mcp/embeddings.py           optional semantic search: hash-keyed vector store
+                                    (EmbeddingStore, Encoder seam, sync_embeddings)
 src/okf_mcp/auth.py                 Authenticator protocol (IdP seam) + static demo impl
 src/okf_mcp/authz.py                per-resource grants (ResourceAuthorizer) + AuditLog
 config/auth.yaml                    demo persona tokens → scope sets
@@ -67,6 +69,7 @@ uv run ruff check                        # lint (line length 100)
 uv run okf-validate bundles/acme-knowledge bundles/acme-knowledge-restricted
 uv run okf-mcp                           # run the MCP server (stdio); OKF_BUNDLE_DIR selects the bundle
 uv run okf-ingest sync                   # mirror sources into $OKF_KNOWLEDGE_ROOT (source-authoritative)
+uv sync --extra semantic                 # optional: enable embeddings (search_concepts, ingest sync)
 ```
 
 CI runs lint, tests, and the validator on every push — all three must pass.

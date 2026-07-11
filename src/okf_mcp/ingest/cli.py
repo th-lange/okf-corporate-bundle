@@ -67,6 +67,7 @@ from pathlib import Path
 
 import yaml
 
+from okf_mcp.embeddings import embeddings_config_from_file, make_post_sync_hook
 from okf_mcp.index import OkfIndex
 from okf_mcp.ingest.drive import DriveSource
 from okf_mcp.ingest.ledger import Ledger
@@ -554,6 +555,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         config_path = args.config if args.config is not None else _default_config()
+        embeddings_config = embeddings_config_from_file(config_path)
         ledger_path, quarantine_dir, specs, catalog_bundles = load_config(config_path)
         sources = [source for source, _, _ in specs]
         ledger = Ledger.load(ledger_path)
@@ -572,16 +574,27 @@ def main(argv: list[str] | None = None) -> int:
         print(exc, file=sys.stderr)
         return 2
 
-    return _sync(
-        root,
-        ledger,
-        ledger_path,
-        specs,
-        transformers,
-        quarantine_dir,
-        since=args.since,
-        allow_empty=args.allow_empty,
-    )
+    # Optional semantic search (issue #45): an `embeddings:` config block
+    # swaps in a hook that embeds this run's ledger after _sync saves it;
+    # absent config or an unavailable encoder both mean no-op, and the
+    # global is restored so this process's next sync isn't affected.
+    global _post_sync
+    previous_post_sync = _post_sync
+    if embeddings_config is not None:
+        _post_sync = make_post_sync_hook(embeddings_config)
+    try:
+        return _sync(
+            root,
+            ledger,
+            ledger_path,
+            specs,
+            transformers,
+            quarantine_dir,
+            since=args.since,
+            allow_empty=args.allow_empty,
+        )
+    finally:
+        _post_sync = previous_post_sync
 
 
 if __name__ == "__main__":
