@@ -29,9 +29,11 @@ vector is never looked up, let alone returned.
 from __future__ import annotations
 
 import array
+import hashlib
 import importlib.util
 import logging
 import math
+import re
 import sqlite3
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
@@ -42,6 +44,7 @@ import yaml
 
 if TYPE_CHECKING:
     from okf_mcp.ingest.ledger import Ledger
+    from okf_mcp.ingest.sources import SourceDocument
 
 logger = logging.getLogger(__name__)
 
@@ -278,7 +281,35 @@ def _ledger_documents(ledger: Ledger) -> Iterable[tuple[str, dict]]:
     return ledger.documents()
 
 
-def sync_embeddings(root: Path, ledger: Ledger, encoder: Encoder, store: EmbeddingStore) -> int:
+def _quarantine_slug(source_uri: str) -> str:
+    """Filesystem-safe stem for a quarantine artifact name, derived from a
+    source URI that may contain `/`, `#`, `:`, ... ."""
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "_", source_uri).strip("_")
+    digest = hashlib.sha256(source_uri.encode("utf-8")).hexdigest()[:8]
+    return f"{slug[:120]}-{digest}"
+
+
+def _quarantine_vector(quarantine_dir: Path | None, source_uri: str, reason: str) -> None:
+    """Write a small quarantine artifact naming the offending source
+    document and why its imported vector was rejected — the doc itself
+    still gets a local-encode fallback (see `sync_embeddings`)."""
+    if quarantine_dir is None:
+        return
+    qdir = Path(quarantine_dir) / "vectors"
+    qdir.mkdir(parents=True, exist_ok=True)
+    artifact = qdir / f"{_quarantine_slug(source_uri)}.txt"
+    artifact.write_text(f"source_uri: {source_uri}\nreason: {reason}\n", encoding="utf-8")
+
+
+def sync_embeddings(
+    root: Path,
+    ledger: Ledger,
+    encoder: Encoder,
+    store: EmbeddingStore,
+    *,
+    docs_with_vectors: dict[str, SourceDocument] | None = None,
+    quarantine_dir: Path | None = None,
+) -> int:
     """Incrementally embed the knowledge tree via the ledger's content hashes.
 
     For every tracked, non-removed ledger entry: if `(content_sha256,
@@ -288,12 +319,30 @@ def sync_embeddings(root: Path, ledger: Ledger, encoder: Encoder, store: Embeddi
     tree and queued. All queued texts are embedded in a single batched
     `encoder.encode()` call. Returns the number of documents encoded.
 
+    `docs_with_vectors` (issue #49) maps `source_uri -> SourceDocument` for
+    this run's documents that carried a precomputed vector (or a sidecar
+    that failed to parse) — built by the caller from the freshly-pulled
+    sources, keyed exactly like the ledger. A document with a valid
+    `SourceDocument.vector` whose `model_id` matches this run's encoder is
+    imported directly (`store.upsert`, zero `encode()` calls) — it is
+    never queued for local encoding. A `model_id` mismatch or a malformed
+    sidecar (`SourceDocument.vector_error`) is quarantined under
+    `quarantine_dir` (source_uri + reason) and falls back to the ordinary
+    local-encode path below, so the document is never silently unembedded
+    and a mismatched vector never enters the store.
+
+    Imported vectors are data, not model judgment: they never set scopes,
+    provenance, or resource URIs — provenance for them is the ledger
+    entry's own source/revision fields, same as any other synced document.
+
     Rows for removed entries are retained (so a later resurrection still
     hits the cache) — this function never deletes rows.
     """
     model_id = encoder.model_id
+    docs_with_vectors = docs_with_vectors or {}
     to_embed: list[tuple[str, str, str]] = []  # (sha, concept_id, text)
-    for _source_uri, entry in _ledger_documents(ledger):
+    imported = 0
+    for source_uri, entry in _ledger_documents(ledger):
         if entry.get("removed_at"):
             continue
         sha = entry.get("content_sha256")
@@ -301,6 +350,21 @@ def sync_embeddings(root: Path, ledger: Ledger, encoder: Encoder, store: Embeddi
         if not sha or not concept_rel:
             continue
         concept_id = _concept_id_from_rel(concept_rel)
+
+        doc = docs_with_vectors.get(source_uri)
+        if doc is not None and doc.vector is not None:
+            if doc.vector.model_id == model_id:
+                store.upsert(sha, model_id, concept_id, list(doc.vector.vector))
+                imported += 1
+                continue
+            _quarantine_vector(
+                quarantine_dir,
+                source_uri,
+                f"model_id mismatch: expected {model_id!r}, got {doc.vector.model_id!r}",
+            )
+        elif doc is not None and doc.vector_error is not None:
+            _quarantine_vector(quarantine_dir, source_uri, doc.vector_error)
+
         if store.has(sha, model_id):
             store.set_concept(sha, model_id, concept_id)
             continue
@@ -310,12 +374,12 @@ def sync_embeddings(root: Path, ledger: Ledger, encoder: Encoder, store: Embeddi
         to_embed.append((sha, concept_id, text))
 
     if not to_embed:
-        return 0
+        return imported
 
     vectors = encoder.encode([text for _, _, text in to_embed])
     for (sha, concept_id, _text), vector in zip(to_embed, vectors, strict=True):
         store.upsert(sha, model_id, concept_id, vector)
-    return len(to_embed)
+    return imported + len(to_embed)
 
 
 def embeddings_config_from_file(config_path: Path) -> dict | None:
@@ -337,15 +401,21 @@ def embeddings_config_from_file(config_path: Path) -> dict | None:
     return block if isinstance(block, dict) else None
 
 
-def make_post_sync_hook(config: dict, store_root: Path) -> Callable[..., None]:
-    """Build a `_post_sync(root, ledger, specs)`-shaped hook from an
-    `embeddings:` config block ({model, path}, both optional).
+def make_post_sync_hook(
+    config: dict, store_root: Path, quarantine_dir: Path | None = None
+) -> Callable[..., None]:
+    """Build a `_post_sync(root, ledger, specs, docs_with_vectors)`-shaped
+    hook from an `embeddings:` config block ({model, path}, both optional).
 
     `store_root` is always the true `$OKF_KNOWLEDGE_ROOT` — the embedding
     store is content-hash-keyed and shared across generations (issue #47),
     never staged per generation, so it stays fixed even when the hook's
     `root` argument (the tree to read concept bodies from) is a staged
     generation directory.
+
+    `quarantine_dir` (issue #49) is the run's configured quarantine
+    directory, forwarded to `sync_embeddings` so a mismatched or malformed
+    imported vector lands next to the run's other quarantine artifacts.
 
     Runs `sync_embeddings` when `sentence-transformers` is importable; when
     it isn't (the `semantic` extra not installed), logs a clear skip naming
@@ -354,7 +424,12 @@ def make_post_sync_hook(config: dict, store_root: Path) -> Callable[..., None]:
     model_id = config.get("model") or DEFAULT_MODEL_ID
     store_relative_path = config.get("path") or DEFAULT_STORE_RELATIVE_PATH
 
-    def hook(root: Path, ledger: Ledger, specs: object) -> None:
+    def hook(
+        root: Path,
+        ledger: Ledger,
+        specs: object,
+        docs_with_vectors: dict[str, SourceDocument] | None = None,
+    ) -> None:
         del specs  # unused: sync_embeddings walks the ledger directly
         if not sentence_transformers_available():
             logger.warning(
@@ -365,7 +440,14 @@ def make_post_sync_hook(config: dict, store_root: Path) -> Callable[..., None]:
             return
         store = EmbeddingStore(Path(store_root) / store_relative_path)
         try:
-            count = sync_embeddings(root, ledger, SentenceTransformerEncoder(model_id), store)
+            count = sync_embeddings(
+                root,
+                ledger,
+                SentenceTransformerEncoder(model_id),
+                store,
+                docs_with_vectors=docs_with_vectors,
+                quarantine_dir=quarantine_dir,
+            )
             logger.info("embedded %d document(s) under model %s", count, model_id)
         finally:
             store.close()

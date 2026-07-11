@@ -25,3 +25,18 @@ sources:
     paths: ["docs/*.md"]
     target: acme-knowledge/imported
     # schedule: 15m   # per-source override of the global `schedule:` above
+
+# --- issue #49: importing precomputed vectors -----------------------------
+# A source opts a connector into pairing `<path>.okf-vec.json` sidecars
+# alongside its documents by setting `vectors: sidecar`. Sidecars carry
+# `{"model_id": ..., "dim": ..., "vector": [...]}`; a vector whose model_id
+# matches the `embeddings:` block above is imported straight into the store
+# (zero local encode calls) — a mismatch or malformed sidecar is quarantined
+# under `ingest/quarantine/vectors/` and the document falls back to local
+# encoding. See docs/usage.md#importing-precomputed-vectors.
+#  - name: precomputed-kb
+#    type: git
+#    url: git@github.com:acme/precomputed-kb.git
+#    paths: ["articles/**/*.md"]
+#    vectors: sidecar
+#    target: acme-knowledge/precomputed

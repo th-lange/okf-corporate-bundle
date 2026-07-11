@@ -49,7 +49,9 @@ src/okf_mcp/writeback.py            upstream proposals: branch in the owning rep
                                     or suggestion artifact for non-git sources
 src/okf_mcp/validator.py            bundle validator CLI (okf-validate)
 src/okf_mcp/ingest/                 okf-ingest: Source connectors (sources.py: git,
-                                    drive.py: gdrive, s3.py: s3),
+                                    drive.py: gdrive, s3.py: s3 — each opts into
+                                    pairing `<path>.okf-vec.json` precomputed-vector
+                                    sidecars via `vectors: sidecar`, issue #49),
                                     Transformer seam (transform.py: passthrough,
                                     llm.py: toolless worker + mechanical checks),
                                     hash-keyed ledger (ledger.py), sync engine + CLI
@@ -114,7 +116,13 @@ CI runs lint, tests, and the validator on every push — all three must pass.
 - **The LLM worker stays toolless and the checks stay deterministic.** Source
   documents are untrusted input; never give the ingest worker tools, never
   replace the mechanical checks with model judgment, and never let model
-  output set scopes, provenance, or unverified resource URIs.
+  output set scopes, provenance, or unverified resource URIs. The same holds
+  for a precomputed vector pulled from a source sidecar (`vectors: sidecar`,
+  issue #49): it is data, never model judgment — it is imported into the
+  embedding store on a matching `model_id` and nothing else, and it never
+  sets scopes, provenance, or resource URIs (provenance stays the ledger
+  entry's own source/revision fields); a mismatched or malformed vector is
+  quarantined and the document falls back to local encoding.
 - **Operator ≠ knowledge.** This repo is the tool; real knowledge lives under
   `OKF_KNOWLEDGE_ROOT` (bundles, ledger, quarantine). The in-repo `bundles/`
   are demo fixtures and sync refuses to write without a knowledge root. Never

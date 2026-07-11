@@ -157,6 +157,7 @@ def _build_source(entry: object) -> SourceSpec:
 
 def _build_connector(entry: dict) -> Source:
     kind = entry.get("type")
+    vectors_sidecar = entry.get("vectors") == "sidecar"
     if kind == "git":
         if not isinstance(entry.get("url"), str):
             raise ConfigError(f"git source {entry['name']!r} needs a `url`")
@@ -165,12 +166,13 @@ def _build_connector(entry: dict) -> Source:
             name=entry["name"],
             url=entry["url"],
             paths=tuple(paths),
+            vectors_sidecar=vectors_sidecar,
         )
     if kind == "gdrive":
         if not isinstance(entry.get("folder_id"), str):
             raise ConfigError(f"gdrive source {entry['name']!r} needs a `folder_id`")
         return DriveSource(
-            name=entry["name"], folder_id=entry["folder_id"]
+            name=entry["name"], folder_id=entry["folder_id"], vectors_sidecar=vectors_sidecar
         )
     if kind == "s3":
         if not isinstance(entry.get("bucket"), str):
@@ -179,6 +181,7 @@ def _build_connector(entry: dict) -> Source:
             name=entry["name"],
             bucket=entry["bucket"],
             prefix=entry.get("prefix", ""),
+            vectors_sidecar=vectors_sidecar,
         )
     raise ConfigError(
         f"unknown source type {kind!r} (known: git, gdrive, s3). New connectors "
@@ -271,9 +274,17 @@ class SourceOutcome:
         return f"{self.status:<8} {self.name}: {detail}"
 
 
-def _post_sync(root: Path, ledger: Ledger, specs: list[SourceSpec]) -> None:
+def _post_sync(
+    root: Path,
+    ledger: Ledger,
+    specs: list[SourceSpec],
+    docs_with_vectors: dict[str, SourceDocument],
+) -> None:
     """Extension seam: runs once per sync, right after the ledger is saved.
-    A no-op here; other subsystems (e.g. the embedding index) that need the
+    `docs_with_vectors` maps source_uri -> the pulled `SourceDocument` for
+    every document carrying a precomputed vector or a vector parse error
+    (issue #49) — empty when no source opts into `vectors: sidecar`. A
+    no-op here; other subsystems (e.g. the embedding index) that need the
     freshly-synced ledger hook in by replacing this function."""
 
 
@@ -495,6 +506,12 @@ def _sync(
         pulled[source.name] = (spec, docs)
 
     current_uris = {doc.source_uri for _, docs in pulled.values() for doc in docs}
+    docs_with_vectors = {
+        doc.source_uri: doc
+        for _, docs in pulled.values()
+        for doc in docs
+        if doc.vector is not None or doc.vector_error is not None
+    }
     counts: Counter[str] = Counter()
     failures: list[str] = []
 
@@ -536,7 +553,7 @@ def _sync(
         outcomes.append(SourceOutcome(name, "OK", source_counts))
 
     ledger.save()
-    _post_sync(true_root or root, ledger, specs)
+    _post_sync(true_root or root, ledger, specs, docs_with_vectors)
 
     commit = _commit(true_root or root, ledger_path, counts, content_root=root)
 
@@ -689,7 +706,7 @@ def _run_watch(
     global _post_sync
     previous_post_sync = _post_sync
     if ctx.embeddings_config is not None:
-        _post_sync = make_post_sync_hook(ctx.embeddings_config, ctx.root)
+        _post_sync = make_post_sync_hook(ctx.embeddings_config, ctx.root, ctx.quarantine_dir)
     try:
         return scheduler.run_watch(
             root=ctx.root,
@@ -785,7 +802,7 @@ def main(argv: list[str] | None = None) -> int:
     global _post_sync
     previous_post_sync = _post_sync
     if ctx.embeddings_config is not None:
-        _post_sync = make_post_sync_hook(ctx.embeddings_config, ctx.root)
+        _post_sync = make_post_sync_hook(ctx.embeddings_config, ctx.root, ctx.quarantine_dir)
     try:
         lock = scheduler.SyncLock(scheduler.lock_path(ctx.root))
         try:

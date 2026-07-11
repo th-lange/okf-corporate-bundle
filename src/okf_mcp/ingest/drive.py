@@ -20,9 +20,17 @@ import urllib.parse
 import urllib.request
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
-from okf_mcp.ingest.sources import SourceDocument, SourceError, SourceUnconfiguredError
+from okf_mcp.ingest.sources import (
+    SIDECAR_SUFFIX,
+    SourceDocument,
+    SourceError,
+    SourceUnconfiguredError,
+    is_sidecar,
+    load_sidecar_vector_from_text,
+)
 
 GOOGLE_DOC_MIME = "application/vnd.google-apps.document"
 _API_BASE = "https://www.googleapis.com/drive/v3"
@@ -51,16 +59,30 @@ class DriveSource:
 
     Native Google Docs are exported as markdown (`<name>.md`); files already
     named `*.md` are taken as-is; anything else is skipped.
+
+    `vectors_sidecar=True` opts into pairing `<name>.okf-vec.json` files in
+    the same folder listing as precomputed-vector sidecars for the doc
+    named `<name>` — cheap because the folder is already listed in full;
+    only a matched sidecar costs an extra `api.download()` call.
     """
 
     name: str
     folder_id: str
     api: DriveApi | None = None  # injectable for tests; None → real REST client
+    vectors_sidecar: bool = False
 
     def documents(self) -> Iterator[SourceDocument]:
         api = self.api or RestDriveApi.from_env()
-        for file in api.list_folder(self.folder_id):
+        files = api.list_folder(self.folder_id)
+        sidecars_by_name = (
+            {f["name"]: f for f in files if is_sidecar(Path(f["name"]))}
+            if self.vectors_sidecar
+            else {}
+        )
+        for file in files:
             file_id, file_name = file["id"], file["name"]
+            if is_sidecar(Path(file_name)):
+                continue  # metadata, never a document in its own right
             if file.get("mimeType") == GOOGLE_DOC_MIME:
                 content = api.export(file_id, "text/markdown")
                 relative_path = file_name if file_name.endswith(".md") else f"{file_name}.md"
@@ -72,11 +94,18 @@ class DriveSource:
             revision = file.get("headRevisionId") or file.get("modifiedTime")
             if not revision:
                 raise SourceError(f"Drive file {file_name!r} has no usable revision id")
+            vector = vector_error = None
+            sidecar_file = sidecars_by_name.get(f"{relative_path}{SIDECAR_SUFFIX}")
+            if sidecar_file is not None:
+                raw = api.download(sidecar_file["id"])
+                vector, vector_error = load_sidecar_vector_from_text(sidecar_file["name"], raw)
             yield SourceDocument(
                 source_uri=f"gdrive://{file_id}",
                 relative_path=relative_path,
                 revision=str(revision),
                 content=content,
+                vector=vector,
+                vector_error=vector_error,
             )
 
 

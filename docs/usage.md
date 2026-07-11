@@ -377,6 +377,63 @@ only for concept ids already in the caller's scoped view
 (`OkfIndex.visible_to`), so an out-of-scope concept can never surface via
 similarity, no matter how close a match its embedding is.
 
+### Importing precomputed vectors (optional, issue #49)
+
+Semantic search above always embeds locally, on this process's encoder. Some
+sources already have vectors — another team's own pipeline computed them
+against their own model — and re-embedding them here would just be waste,
+plus a second, drifting copy of "the" embedding for that content. A source
+can instead carry its vectors along and let sync **import** them, staying
+independent of that team's ingestion or rebuild schedule.
+
+A connector opts in per source with `vectors: sidecar`:
+
+```yaml
+sources:
+  - name: precomputed-kb
+    type: git
+    url: git@github.com:acme/precomputed-kb.git
+    paths: ["articles/**/*.md"]
+    vectors: sidecar
+    target: acme-knowledge/precomputed
+```
+
+With it set, every document `<path>` may be accompanied by a **sidecar**
+file `<path>.okf-vec.json` alongside it in the same source:
+
+```json
+{"model_id": "acme-embeddings/v3", "dim": 768, "vector": [0.0123, -0.041, ...]}
+```
+
+Sidecars are metadata, never knowledge: they are excluded from document
+enumeration (a source never yields one as a `SourceDocument` in its own
+right), never written into the knowledge tree, and never become concepts.
+Connectors without `vectors: sidecar` never look for them — the opt-in is
+per source, not global. `git` sources pair sidecars for free (the same
+checkout already has the file next to its document); `gdrive` and `s3`
+pair them from the same folder/prefix listing they already fetch, at the
+cost of one extra download per matched sidecar.
+
+During sync, a document whose sidecar's `model_id` matches the configured
+`embeddings:` encoder is imported straight into the store — normalized like
+any local vector, keyed `(content_sha256, model_id)` — with **zero local
+`encode()` calls** for that document. A `model_id` that does **not** match
+is never silently compared across embedding spaces: it is quarantined under
+`ingest/quarantine/vectors/` (a small artifact naming the source URI and the
+expected vs. actual `model_id`), and the document falls back to the ordinary
+local-encode path, so it is never left unembedded. A malformed sidecar
+(wrong types, `NaN`/`Inf`, or a `dim` that doesn't match the vector's
+length) gets the identical treatment — quarantined, then locally encoded —
+and never crashes the sync run.
+
+**An imported vector is data, not model judgment or trust.** It never sets
+scopes, provenance, or resource URIs; provenance for it is the same
+ledger-tracked source/revision fields as any other synced document, and
+serving is untouched — `vectors_for` still filters to the caller's scoped
+view before any lookup, so an out-of-scope concept's imported vector is
+exactly as unreachable as a locally-encoded one.
+
+
 ### Generational publish (optional)
 
 Off by default; sync writes in place, exactly as above. To enable it, add

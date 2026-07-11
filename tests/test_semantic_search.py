@@ -104,6 +104,24 @@ async def test_semantic_hit_outside_scope_never_surfaces(scoped_root: Path) -> N
 
 
 @pytest.mark.anyio
+async def test_imported_vector_outside_scope_never_surfaces(scoped_root: Path) -> None:
+    """Regression for issue #49: a vector imported from a source sidecar is
+    stored via the same `EmbeddingStore.upsert` path as a locally-encoded
+    one — `visible_to` filtering never distinguishes the two, so an
+    imported vector for an out-of-scope concept must stay unreachable too."""
+    kb = scoped_root / "bundles" / "kb"
+    encoder = FixedEncoder([1.0, 0.0])  # closest to the restricted (imported) concept
+
+    public_server = build_server(bundle_dirs=kb, scopes=[], encoder=encoder)
+    result = await public_server.call_tool(
+        "search_concepts", {"query": _NO_KEYWORD_HIT_QUERY, "limit": 5}
+    )
+    ids = {json.loads(item.text)["id"] for item in result[0]}
+    assert ids == {"/public/widget"}
+    assert "/restricted/secret" not in ids
+
+
+@pytest.mark.anyio
 async def test_search_without_encoder_or_store_matches_keyword_baseline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

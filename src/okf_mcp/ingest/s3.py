@@ -17,7 +17,13 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Protocol
 
-from okf_mcp.ingest.sources import SourceDocument, SourceError, SourceUnconfiguredError
+from okf_mcp.ingest.sources import (
+    SIDECAR_SUFFIX,
+    SourceDocument,
+    SourceError,
+    SourceUnconfiguredError,
+    load_sidecar_vector_from_text,
+)
 
 
 class S3Api(Protocol):
@@ -34,16 +40,25 @@ class S3Api(Protocol):
 
 @dataclass(frozen=True)
 class S3Source:
-    """Pull markdown documents from an S3 bucket/prefix."""
+    """Pull markdown documents from an S3 bucket/prefix.
+
+    `vectors_sidecar=True` opts into pairing `<key>.okf-vec.json` objects
+    under the same prefix as precomputed-vector sidecars — cheap because
+    `list_objects` already enumerates the whole prefix in one call; only a
+    matched sidecar costs an extra `get_object`.
+    """
 
     name: str
     bucket: str
     prefix: str = ""
     api: S3Api | None = None  # injectable for tests; None → boto3 client
+    vectors_sidecar: bool = False
 
     def documents(self) -> Iterator[SourceDocument]:
         api = self.api or Boto3S3Api.from_default_chain()
-        for obj in api.list_objects(self.bucket, self.prefix):
+        objects = api.list_objects(self.bucket, self.prefix)
+        keys = {obj["key"] for obj in objects} if self.vectors_sidecar else set()
+        for obj in objects:
             key = obj["key"]
             if not key.endswith(".md"):
                 continue
@@ -51,11 +66,18 @@ class S3Source:
             if not etag:
                 raise SourceError(f"S3 object {key!r} has no ETag to use as revision")
             relative_path = key[len(self.prefix) :].lstrip("/") if self.prefix else key
+            vector = vector_error = None
+            sidecar_key = f"{key}{SIDECAR_SUFFIX}"
+            if sidecar_key in keys:
+                raw = api.get_object(self.bucket, sidecar_key)
+                vector, vector_error = load_sidecar_vector_from_text(sidecar_key, raw)
             yield SourceDocument(
                 source_uri=f"s3://{self.bucket}/{key}",
                 relative_path=relative_path,
                 revision=etag,
                 content=api.get_object(self.bucket, key),
+                vector=vector,
+                vector_error=vector_error,
             )
 
 
