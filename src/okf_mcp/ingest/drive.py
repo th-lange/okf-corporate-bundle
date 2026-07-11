@@ -22,7 +22,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Protocol
 
-from okf_mcp.ingest.sources import SourceDocument, SourceError
+from okf_mcp.ingest.sources import SourceDocument, SourceError, SourceUnconfiguredError
 
 GOOGLE_DOC_MIME = "application/vnd.google-apps.document"
 _API_BASE = "https://www.googleapis.com/drive/v3"
@@ -90,7 +90,7 @@ class RestDriveApi:
     def from_env(cls) -> RestDriveApi:
         token = os.environ.get(_TOKEN_ENV)
         if not token:
-            raise SourceError(
+            raise SourceUnconfiguredError(
                 f"Google Drive sources need the {_TOKEN_ENV} environment variable "
                 "(an OAuth bearer token with drive.readonly scope)."
             )

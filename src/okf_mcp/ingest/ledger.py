@@ -18,6 +18,7 @@ here with `removed_at`; git history in the knowledge repo is the tombstone.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -87,12 +88,15 @@ class Ledger:
         }
 
     def mark_seen(self, source_uri: str, revision: str | None = None) -> None:
-        """A tracked document is present and unchanged; refresh its revision."""
+        """A tracked document is present and unchanged; refresh its revision
+        and `synced_at` so the `--since` staleness window stays meaningful
+        for documents that never change."""
         entry = self._documents.get(source_uri)
         if entry is not None:
             entry.pop("removed_at", None)
             if revision is not None:
                 entry["revision"] = revision
+            entry["synced_at"] = _now()
 
     def match_by_sha(self, content_sha256: str, current_uris: set[str]) -> str | None:
         """A prior URI whose content matches and which is absent from this run.
@@ -116,14 +120,29 @@ class Ledger:
         self._documents[new_uri] = entry
         return entry, was_removed
 
-    def sweep_removed(self, seen_uris: set[str]) -> list[str]:
-        """Flag tracked documents that vanished upstream; return newly flagged."""
+    def sweep_removed(self, seen_uris: set[str], source: str) -> list[str]:
+        """Flag `source`'s tracked documents that vanished upstream; return
+        newly flagged uris. Scoped to `source` (via the `source` field
+        stamped by `record`) so one source's isolated failure can never
+        tombstone another source's entries."""
         newly_removed = []
         for uri, entry in self._documents.items():
+            if entry.get("source") != source:
+                continue
             if uri not in seen_uris and "removed_at" not in entry:
                 entry["removed_at"] = _now()
                 newly_removed.append(uri)
         return sorted(newly_removed)
+
+    def active_count(self, source: str) -> int:
+        """Non-removed entries tracked for `source` — used by sync's
+        empty-source guard (0 documents from a source that previously had
+        entries is suspicious, not a legitimate removal)."""
+        return sum(
+            1
+            for entry in self._documents.values()
+            if entry.get("source") == source and "removed_at" not in entry
+        )
 
     def status(self, current: dict[str, tuple[str, str]]) -> list[tuple[str, State]]:
         """Classify every known and current document, without mutating.
@@ -140,3 +159,8 @@ class Ledger:
 
     def entry(self, source_uri: str) -> dict | None:
         return self._documents.get(source_uri)
+
+    def documents(self) -> Iterator[tuple[str, dict]]:
+        """Iterate all tracked (source_uri, entry) pairs, including removed
+        ones — callers filter on `removed_at` themselves."""
+        return iter(self._documents.items())

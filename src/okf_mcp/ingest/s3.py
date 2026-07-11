@@ -17,7 +17,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Protocol
 
-from okf_mcp.ingest.sources import SourceDocument, SourceError
+from okf_mcp.ingest.sources import SourceDocument, SourceError, SourceUnconfiguredError
 
 
 class S3Api(Protocol):
@@ -70,7 +70,7 @@ class Boto3S3Api:
         try:
             import boto3
         except ImportError:
-            raise SourceError(
+            raise SourceUnconfiguredError(
                 "S3 sources need boto3 — install the `s3` extra "
                 "(uv sync --extra s3). Credentials come from the standard "
                 "AWS chain (env vars, profile, instance role)."
@@ -78,7 +78,7 @@ class Boto3S3Api:
         return cls(boto3.client("s3"))
 
     def list_objects(self, bucket: str, prefix: str) -> list[dict]:
-        from botocore.exceptions import BotoCoreError, ClientError
+        from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 
         try:
             paginator = self._client.get_paginator("list_objects_v2")
@@ -87,14 +87,22 @@ class Boto3S3Api:
                 for page in paginator.paginate(Bucket=bucket, Prefix=prefix)
                 for obj in page.get("Contents", [])
             ]
+        except NoCredentialsError as exc:
+            raise SourceUnconfiguredError(
+                f"S3 source has no AWS credentials configured (s3://{bucket}/{prefix}): {exc}"
+            ) from exc
         except (BotoCoreError, ClientError) as exc:
             raise SourceError(f"S3 list failed for s3://{bucket}/{prefix}: {exc}") from exc
 
     def get_object(self, bucket: str, key: str) -> str:
-        from botocore.exceptions import BotoCoreError, ClientError
+        from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 
         try:
             response = self._client.get_object(Bucket=bucket, Key=key)
             return response["Body"].read().decode("utf-8")
+        except NoCredentialsError as exc:
+            raise SourceUnconfiguredError(
+                f"S3 source has no AWS credentials configured (s3://{bucket}/{key}): {exc}"
+            ) from exc
         except (BotoCoreError, ClientError) as exc:
             raise SourceError(f"S3 get failed for s3://{bucket}/{key}: {exc}") from exc

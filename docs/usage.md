@@ -179,6 +179,8 @@ flowchart LR
 uv run okf-ingest sync             # mirror sources into $OKF_KNOWLEDGE_ROOT
 uv run okf-ingest status           # classify only, change nothing
 uv run okf-ingest sync --config my.yaml
+uv run okf-ingest sync --since 3d              # skip docs synced within the last 3 days
+uv run okf-ingest sync --allow-empty           # sweep a source even if it returned 0 docs
 ```
 
 Sync requires `OKF_KNOWLEDGE_ROOT` — the operator repo's fixture bundles are
@@ -197,6 +199,26 @@ report** lists any links left dangling, so the owners fix them in their
 sources. A document that fails the mechanical checks never replaces its
 predecessor: the old concept stays served and the failed output lands in
 `ingest/quarantine/` with a report line (exit code 1).
+
+**Sources are isolated from each other.** Each source is pulled and applied
+independently: one source raising an error never blocks or corrupts another
+source's update in the same run. Sync prints a per-source outcome line —
+`OK` (applied, with its counts), `SKIPPED` (the source isn't configured —
+missing credentials/env, e.g. no `GOOGLE_DRIVE_TOKEN` — this is not an
+error), or `FAILED` (a configured source errored while pulling). The
+removal sweep is scoped to each source's own entries (via the `source`
+field the ledger already stamps), so a `FAILED` source's entries are never
+swept, and a source that cleanly returns **zero** documents while the
+ledger still holds active entries for it is treated as suspicious: sync
+warns and skips the sweep unless `--allow-empty` is passed. The process
+exits non-zero only when a source `FAILED` or a document was quarantined —
+never for `SKIPPED` alone.
+
+`--since Nd|Nh|Nw` (e.g. `3d`, `12h`, `2w`) skips re-processing documents
+whose ledger `synced_at` is still inside the window — useful for large or
+slow sources where most content hasn't changed since the last run. New
+documents (no ledger entry yet) are always processed regardless of
+`--since`; a malformed value is rejected with a standard argparse error.
 
 Available source types — new connectors implement the `Source` protocol in
 `src/okf_mcp/ingest/sources.py`:

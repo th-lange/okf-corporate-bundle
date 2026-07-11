@@ -20,6 +20,13 @@ class SourceError(RuntimeError):
     """Raised when a source cannot be reached or read."""
 
 
+class SourceUnconfiguredError(SourceError):
+    """Raised when a source has no credentials/config to even attempt a
+    pull (missing env var, missing token, missing SDK) — distinct from a
+    configured source failing at runtime. Sync treats this as SKIPPED,
+    never FAILED."""
+
+
 @dataclass(frozen=True)
 class SourceDocument:
     """One document pulled from a source."""

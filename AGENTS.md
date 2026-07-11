@@ -87,7 +87,16 @@ CI runs lint, tests, and the validator on every push — all three must pass.
   (add / replace / remove, one commit per run, hash-keyed identity) and
   enforces only mechanical rules: validator passes, scope fields never come
   from source content, provenance is stamped by the pipeline, failed
-  conversions keep last-known-good and land in quarantine.
+  conversions keep last-known-good and land in quarantine. **Sources are
+  isolated from each other** (issue #46): each is pulled and applied
+  independently with a per-source outcome (OK / SKIPPED — not configured /
+  FAILED — errored), and one source's failure never blocks another's
+  update. The removal sweep is scoped per source (`Ledger.sweep_removed`
+  keyed on the entry's `source` field), so a `FAILED` source's entries are
+  never swept, and a source that cleanly returns zero documents while the
+  ledger holds active entries for it is guarded (warn, or `--allow-empty`
+  to sweep anyway) rather than silently tombstoned. Exit code is non-zero
+  only on a real `FAILED` source or a quarantined document.
 - **Write-back goes upstream, never into the tree.** `propose_upstream`
   creates a branch in the owning sector's source (or a suggestion artifact
   for non-git sources); it must never write to `bundles/` and never merge —

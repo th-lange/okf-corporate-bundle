@@ -35,7 +35,7 @@ def test_match_and_adopt_preserve_the_concept(tmp_path: Path) -> None:
 
 def test_adopt_after_removal_reports_restoration(tmp_path: Path) -> None:
     ledger = make(tmp_path)
-    assert ledger.sweep_removed(set()) == ["uri://a"]
+    assert ledger.sweep_removed(set(), source="src") == ["uri://a"]
     assert "removed_at" in ledger.entry("uri://a")
 
     entry, was_removed = ledger.adopt("uri://a", "uri://c", "rev3")
@@ -46,13 +46,13 @@ def test_adopt_after_removal_reports_restoration(tmp_path: Path) -> None:
 def test_sweep_flags_each_document_once(tmp_path: Path) -> None:
     ledger = make(tmp_path)
     ledger.record("uri://b", "src", "bundles/kb/b.md", "rev1", "sha-b")
-    assert ledger.sweep_removed({"uri://a"}) == ["uri://b"]
-    assert ledger.sweep_removed({"uri://a"}) == []  # already flagged
+    assert ledger.sweep_removed({"uri://a"}, source="src") == ["uri://b"]
+    assert ledger.sweep_removed({"uri://a"}, source="src") == []  # already flagged
 
 
 def test_mark_seen_refreshes_revision_and_clears_flag(tmp_path: Path) -> None:
     ledger = make(tmp_path)
-    ledger.sweep_removed(set())
+    ledger.sweep_removed(set(), source="src")
     ledger.mark_seen("uri://a", revision="rev9")
     entry = ledger.entry("uri://a")
     assert entry["revision"] == "rev9"
