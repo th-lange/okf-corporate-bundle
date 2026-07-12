@@ -48,7 +48,7 @@ def test_fresh_checkout_materializes_only_configured_paths(
     docs = {d.relative_path for d in source.documents()}
     assert docs == {"docs/a.md"}  # policies/ and bin/ never even asked for
 
-    clone = tmp_path / "cache" / "scoped"
+    clone = source._checkout()
     materialized = {
         p.relative_to(clone).as_posix()
         for p in clone.rglob("*")
@@ -108,5 +108,5 @@ def test_update_via_pull_respects_the_sparse_scope(upstream: Path, tmp_path: Pat
     (doc,) = list(source.documents())  # triggers pull --ff-only on the cache
     assert doc.relative_path == "docs/a.md"
     assert doc.content == "# Doc A v2\n"
-    clone = tmp_path / "cache" / "scoped"
+    clone = source._checkout()
     assert not (clone / "policies" / "b.md").exists()  # still out of scope

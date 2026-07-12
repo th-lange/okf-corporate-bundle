@@ -13,4 +13,3 @@ uv.lock
 
 # okf-ingest workspace (sync state lives in the knowledge root, never here)
 /ingest/
-.okf-ingest-cache/

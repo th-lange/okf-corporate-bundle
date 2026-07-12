@@ -11,11 +11,14 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import shutil
 import subprocess
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+
+from okf_mcp.knowledge import knowledge_root
 
 
 class SourceError(RuntimeError):
@@ -168,12 +171,19 @@ class GitSource:
     patterns apply directly) limits the working tree to it. Commit history
     is never shallowed — the per-file revision lookup needs full history,
     not blob content, so it is unaffected.
+
+    Clone state lives under `<knowledge root>/ingest/cache/git/`, never the
+    process cwd (issue #50) — pass an explicit `cache_dir` to override
+    (tests use `tmp_path`). The clone directory is keyed by `name` AND a
+    short hash of `url`, so two sources sharing a `name` with different
+    URLs never collide on one clone, and a URL change under a stable name
+    never fast-forwards the old remote's clone.
     """
 
     name: str
     url: str
     paths: tuple[str, ...] = ("**/*.md",)
-    cache_dir: Path = Path(".okf-ingest-cache")
+    cache_dir: Path | None = None
     vectors_sidecar: bool = False  # opt-in: pair `<path>.okf-vec.json` sidecars
 
     def documents(self) -> Iterator[SourceDocument]:
@@ -200,19 +210,51 @@ class GitSource:
                     vector_error=vector_error,
                 )
 
+    def _cache_root(self) -> Path:
+        """Where this source's clones live: the explicit override, else
+        `<knowledge root>/ingest/cache/git/` (never the process cwd — issue
+        #50), falling back to the old cwd-relative default only when no
+        knowledge root is configured at all (e.g. a bare dataclass built in
+        a test without OKF_KNOWLEDGE_ROOT)."""
+        if self.cache_dir is not None:
+            return self.cache_dir
+        root = knowledge_root()
+        if root is not None:
+            return root / "ingest" / "cache" / "git"
+        return Path(".okf-ingest-cache")
+
+    def _clone_key(self) -> str:
+        """`<name>-<short-hash(url)>`: two configs (or tests) sharing a
+        `name` with different URLs can never share a clone, and a URL
+        change under a stable name never reuses the old remote's clone."""
+        digest = hashlib.sha256(self.url.encode("utf-8")).hexdigest()[:12]
+        return f"{self.name}-{digest}"
+
     def _checkout(self) -> Path:
         local = Path(self.url)
         if (local / ".git").exists():
             return local
-        clone = self.cache_dir / self.name
+        clone = self._cache_root() / self._clone_key()
         if (clone / ".git").exists():
-            # Partial-clone filter and sparse-checkout patterns persist in
-            # the clone's config, so a plain fast-forward pull respects both.
-            _git(clone, "pull", "--ff-only", "--quiet")
+            if self._origin_mismatch(clone):
+                # Belt-and-braces for clones created before the URL-hashed
+                # key existed: discard and re-clone rather than pulling a
+                # stale remote under a reused path.
+                shutil.rmtree(clone)
+                self._sparse_clone(clone)
+            else:
+                # Partial-clone filter and sparse-checkout patterns persist
+                # in the clone's config, so a plain fast-forward pull
+                # respects both.
+                _git(clone, "pull", "--ff-only", "--quiet")
         else:
             clone.parent.mkdir(parents=True, exist_ok=True)
             self._sparse_clone(clone)
         return clone
+
+    def _origin_mismatch(self, clone: Path) -> bool:
+        origin = _git(clone, "remote", "get-url", "origin").strip()
+        return origin != self.url
 
     def _sparse_clone(self, clone: Path) -> None:
         try:
