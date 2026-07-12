@@ -238,7 +238,16 @@ Available source types — new connectors implement the `Source` protocol in
   `--filter=blob:none --sparse` means only the configured folders' blobs are
   ever fetched or materialized — pointing a source at one folder of a large
   monorepo does not download the rest of it. Commit history is kept in full
-  (never shallowed), so revision lookup is unaffected.
+  (never shallowed), so revision lookup is unaffected. Clone state lives
+  under `<knowledge root>/ingest/cache/git/` by default (an explicit
+  `cache_dir` on `GitSource` overrides it — used by tests), keyed by
+  `<name>-<short hash of url>` so two sources sharing a `name` with
+  different URLs never share or fight over a clone; if a source's `url`
+  changes under a stable `name`, or an existing clone's `origin` no longer
+  matches the configured `url`, the stale clone is discarded and re-cloned
+  rather than fast-forwarded. The cache is transient fetch state, never
+  knowledge: it lives outside `generations/<id>/` and previous releases'
+  `.okf-ingest-cache/` (cwd-relative) is superseded — safe to delete.
 - `gdrive` — `folder_id` of a Drive folder. Native Google Docs are exported
   as markdown, `*.md` files downloaded as-is, everything else skipped.
   Revision = `headRevisionId` (falling back to `modifiedTime`). Credentials
